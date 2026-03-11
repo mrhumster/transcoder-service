@@ -2,14 +2,14 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: transcode-service
+  name: transcoder-service
   namespace: go-app
   labels:
-    app: transcode-service
+    app: transcoder-service
 spec:
   selector:
     matchLabels:
-      app: transcode-service
+      app: transcoder-service
   replicas: 1
   strategy:
     rollingUpdate:
@@ -19,13 +19,13 @@ spec:
   template:
     metadata:
       annotations:
-        kubectl.kubernetes.io/default-container: transcode-service
+        kubectl.kubernetes.io/default-container: transcoder-service
       labels:
-        app: transcode-service
+        app: transcoder-service
     spec:
       containers:
-        - name: transcode-service
-          image: xomrkob/transcode-service:latest
+        - name: transcoder-service
+          image: xomrkob/transcoder-service:v0.0.1-1-g1b329f0
           imagePullPolicy:
           resources:
             requests:

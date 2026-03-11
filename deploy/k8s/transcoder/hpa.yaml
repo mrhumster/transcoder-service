@@ -1,5 +1,5 @@
 apiVersion: autoscaling/v2
-kind: HorizonatalPodAutoscaler
+kind: HorizontalPodAutoscaler
 metadata:
   name: transcoder-hpa
 spec:
@@ -13,5 +13,6 @@ spec:
     - type: Resource
       resource:
         name: cpu
-        target: Utilization
-        averageUtilization: 70%
+        target:
+          type: Utilization
+          averageUtilization: 70
