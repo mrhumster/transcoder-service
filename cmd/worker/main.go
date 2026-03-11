@@ -27,6 +27,7 @@ func main() {
 	r := asynq.RedisClientOpt{
 		Addr:     cfg.Redis.Addr,
 		Password: cfg.Redis.Passwrod,
+		DB:       2,
 	}
 	srv := asynq.NewServer(r, asynq.Config{Concurrency: 3})
 
