@@ -1,0 +1,17 @@
+apiVersion: autoscaling/v2
+kind: HorizonatalPodAutoscaler
+metadata:
+  name: transcoder-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: transcoder-service
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: Utilization
+        averageUtilization: 70%

@@ -1,0 +1,82 @@
+# https://kubernetes.io/docs/concepts/workloads/controllers/deployment/
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transcode-service
+  namespace: go-app
+  labels:
+    app: transcode-service
+spec:
+  selector:
+    matchLabels:
+      app: transcode-service
+  replicas: 1
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: transcode-service
+      labels:
+        app: transcode-service
+    spec:
+      containers:
+        - name: transcode-service
+          image: xomrkob/transcode-service:latest
+          imagePullPolicy:
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+          livenessProbe:
+            exec:
+              command: ["/bin/sh", "-c", "ps aux | grep worker"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          env:
+            - name: REDIS_ADDR
+              value: casbin-redis-master:6379
+            - name: REDIS_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: casbin-redis
+                  key: redis-password
+            - name: MINIO_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: go-app-config
+                  key: MINIO_ENDPOINT
+            - name: MINIO_BUCKET_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: go-app-config
+                  key: MINIO_BUCKET_NAME
+            - name: MINIO_USE_SSL
+              valueFrom:
+                configMapKeyRef:
+                  name: go-app-config
+                  key: MINIO_USE_SSL
+            - name: MINIO_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: go-app-config
+                  key: MINIO_REGION
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: MINIO_ACCESS_KEY
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: MINIO_SECRET_KEY
+      restartPolicy: Always
+---
+
