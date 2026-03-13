@@ -39,6 +39,12 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 		slog.Error("error creating temp dir", "error", err)
 		return err
 	}
+
+	if err := os.Mkdir(hlsOutputDir, 0o755); err != nil {
+		slog.Error("error creating temp dir", "error", err)
+		return err
+	}
+
 	defer os.RemoveAll(outputDir)
 
 	slog.Info("downloading source", "path", p.InputPath)
