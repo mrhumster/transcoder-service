@@ -6,7 +6,9 @@ import (
 
 	"github.com/hibiken/asynq"
 	"github.com/mrhumster/transcoder-service/config"
+	"github.com/mrhumster/transcoder-service/internal/processor"
 	"github.com/mrhumster/transcoder-service/internal/queue"
+	"github.com/mrhumster/transcoder-service/internal/storage"
 )
 
 func main() {
@@ -30,10 +32,14 @@ func main() {
 		DB:       2,
 	}
 	srv := asynq.NewServer(r, asynq.Config{Concurrency: 3})
-
+	minioStorage, err := storage.NewMinIOStorageFromConfig(cfg.MinIO)
+	if err != nil {
+		slog.Error("error init minio storage", "error", err)
+	}
+	ffmpeg := processor.NewFFmpegProcessor()
+	hanlder := queue.NewHandleVideoTranscoder(ffmpeg, minioStorage)
 	mux := asynq.NewServeMux()
-
-	mux.HandleFunc(queue.TaskVideoTranscoding, queue.HandleVideoTranscodeTask)
+	mux.HandleFunc(queue.TaskVideoTranscoding, hanlder.HandleVideoTranscoderTask)
 
 	slog.Info("Transoder Worker started...")
 	if err := srv.Run(mux); err != nil {

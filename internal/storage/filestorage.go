@@ -6,4 +6,5 @@ import "context"
 type FileStorage interface {
 	Download(ctx context.Context, remoteKey, localPath string) error
 	Upload(ctx context.Context, remoteKey, localPath, contentType string) error
+	UploadDir(ctx context.Context, remoteDir, localDir string) error
 }
