@@ -12,9 +12,12 @@ type FFmpegProcessor struct {
 	binPath string
 }
 
-func NewFFmpegProcessor() *FFmpegProcessor {
-	path, _ := exec.LookPath("ffmpeg")
-	return &FFmpegProcessor{binPath: path}
+func NewFFmpegProcessor() (*FFmpegProcessor, error) {
+	path, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return nil, fmt.Errorf("ffmpeg not found in system: %w", err)
+	}
+	return &FFmpegProcessor{binPath: path}, nil
 }
 
 func (p *FFmpegProcessor) TranscodeToHLS(ctx context.Context, inputPath, outputDir string) error {

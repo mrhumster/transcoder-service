@@ -43,17 +43,28 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 
 	slog.Info("downloading source", "path", p.InputPath)
 	if err := h.storage.Download(ctx, p.InputPath, inputLocal); err != nil {
+		slog.Error("downaload failed",
+			"uuid", p.StreamUUID,
+			"inputPath", p.InputPath,
+			"inputLocal", inputLocal,
+			"error", err)
 		return nil
 	}
 
 	slog.Info("processing", "uuid", p.StreamUUID)
 	if err := h.processor.TranscodeToHLS(ctx, inputLocal, hlsOutputDir); err != nil {
+		slog.Error("ffmpeg processed failed",
+			"uuid", p.StreamUUID,
+			"error", err)
 		return err
 	}
 
 	remoteProcessedDir := fmt.Sprintf("processed/%s", p.StreamUUID)
 	slog.Info("uploading HLS result", "remote", remoteProcessedDir)
 	if err := h.storage.UploadDir(ctx, remoteProcessedDir, hlsOutputDir); err != nil {
+		slog.Error("uploading error",
+			"uuid", p.StreamUUID,
+			"error", err)
 		return err
 	}
 	slog.Info("transcoding success", "uuid", p.StreamUUID)

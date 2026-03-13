@@ -18,6 +18,7 @@ ARG BUILD_DATE=11.03.2026
 LABEL version=$VERSION \
   build-date=$BUILD_DATE \
   maintainer="me@xomrkob.ru"
+RUN apk add --no-cache ffmpeg ca-certificates
 RUN addgroup -g 1000 appgroup && \
   adduser -D -u 1000 -G appgroup appuser
 WORKDIR /app 

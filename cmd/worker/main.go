@@ -24,7 +24,7 @@ func main() {
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		slog.Error("error load config")
-		return
+		os.Exit(1)
 	}
 	r := asynq.RedisClientOpt{
 		Addr:     cfg.Redis.Addr,
@@ -35,8 +35,13 @@ func main() {
 	minioStorage, err := storage.NewMinIOStorageFromConfig(cfg.MinIO)
 	if err != nil {
 		slog.Error("error init minio storage", "error", err)
+		os.Exit(1)
 	}
-	ffmpeg := processor.NewFFmpegProcessor()
+	ffmpeg, err := processor.NewFFmpegProcessor()
+	if err != nil {
+		slog.Error("error init processor", "error", err)
+		os.Exit(1)
+	}
 	hanlder := queue.NewHandleVideoTranscoder(ffmpeg, minioStorage)
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(queue.TaskVideoTranscoding, hanlder.HandleVideoTranscoderTask)
@@ -44,6 +49,6 @@ func main() {
 	slog.Info("Transoder Worker started...")
 	if err := srv.Run(mux); err != nil {
 		slog.Error("could not run asynq server:", "error", err.Error())
-		return
+		os.Exit(1)
 	}
 }
