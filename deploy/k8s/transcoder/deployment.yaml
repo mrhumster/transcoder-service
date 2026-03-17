@@ -25,7 +25,7 @@ spec:
     spec:
       containers:
         - name: transcoder-service
-          image: xomrkob/transcoder-service:v0.0.1-1-g1b329f0
+          image: xomrkob/transcoder-service:latest
           imagePullPolicy:
           resources:
             requests:
