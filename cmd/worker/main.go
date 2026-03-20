@@ -6,9 +6,12 @@ import (
 
 	"github.com/hibiken/asynq"
 	"github.com/mrhumster/transcoder-service/config"
+	pb "github.com/mrhumster/transcoder-service/gen/go/stream"
 	"github.com/mrhumster/transcoder-service/internal/processor"
 	"github.com/mrhumster/transcoder-service/internal/queue"
 	"github.com/mrhumster/transcoder-service/internal/storage"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 func main() {
@@ -42,7 +45,18 @@ func main() {
 		slog.Error("error init processor", "error", err)
 		os.Exit(1)
 	}
-	hanlder := queue.NewHandleVideoTranscoder(ffmpeg, minioStorage)
+
+	conn, err := grpc.NewClient(cfg.Server.StreamSeviceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		slog.Error("error init gRPC client: %w", "error", err)
+		os.Exit(1)
+	}
+
+	defer conn.Close()
+
+	streamServiceClient := pb.NewStreamServiceClient(conn)
+
+	hanlder := queue.NewHandleVideoTranscoder(ffmpeg, minioStorage, streamServiceClient)
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(queue.TaskVideoTranscoding, hanlder.HandleVideoTranscoderTask)
 

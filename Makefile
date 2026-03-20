@@ -3,8 +3,12 @@ NAMESPACE := go-app
 DEPLOYMENT := transcoder-service
 VERSION ?= $(shell git describe --tags --always || echo "latest")
 BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+MODULE_NAME := github.com/mrhumster/transcoder-service
 
-.PHONY: all build push deploy clean
+PROTO_DIR := proto/stream
+GEN_DIR := gen/go
+
+.PHONY: all build push deploy clean proto
 
 all: build push deploy
 
@@ -32,3 +36,13 @@ test:
 
 logs:
 	kubectl -n $(NAMESPACE) logs -f -l app=transcoder
+
+proto:
+	@echo "Generate protoc"
+	mkdir -p $(GEN_DIR)
+	protoc --proto_path=$(PROTO_DIR) \
+		--go_out=. --go-grpc_out=. \
+		--go_opt=module=$(MODULE_NAME) \
+		--go-grpc_opt=module=$(MODULE_NAME) \
+		$(PROTO_DIR)/*.proto
+	@echo "Proto file generated in $(GEN_DIR)"

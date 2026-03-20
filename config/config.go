@@ -6,8 +6,13 @@ import (
 )
 
 type Config struct {
-	Redis Redis
-	MinIO MinIO
+	Redis  Redis
+	MinIO  MinIO
+	Server Server
+}
+
+type Server struct {
+	StreamSeviceAddr string
 }
 
 type Redis struct {
@@ -38,6 +43,9 @@ func LoadConfig() (*Config, error) {
 			BucketName:      getEnv("MINIO_BUCKET_NAME", "stream-service-test"),
 			UseSSL:          useSSL,
 			Region:          getEnv("MINIO_REGION", "ru-east-1"),
+		},
+		Server: Server{
+			StreamSeviceAddr: getEnv("STREAM_SERVICE_ADDR", "localhost:50051"),
 		},
 	}, nil
 }

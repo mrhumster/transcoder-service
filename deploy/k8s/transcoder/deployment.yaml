@@ -40,6 +40,8 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 10
           env:
+            - name: STREAM_SERVICE_ADDR
+              value: stream-service:50051
             - name: REDIS_ADDR
               value: casbin-redis-master:6379
             - name: REDIS_PASS

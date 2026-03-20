@@ -8,19 +8,22 @@ import (
 	"os"
 
 	"github.com/hibiken/asynq"
+	pb "github.com/mrhumster/transcoder-service/gen/go/stream"
 	"github.com/mrhumster/transcoder-service/internal/processor"
 	"github.com/mrhumster/transcoder-service/internal/storage"
 )
 
 type HandleVideoTrancoder struct {
-	processor processor.VideoProcessor
-	storage   storage.FileStorage
+	processor     processor.VideoProcessor
+	storage       storage.FileStorage
+	streamService pb.StreamServiceClient
 }
 
-func NewHandleVideoTranscoder(p processor.VideoProcessor, s storage.FileStorage) *HandleVideoTrancoder {
+func NewHandleVideoTranscoder(p processor.VideoProcessor, s storage.FileStorage, svc pb.StreamServiceClient) *HandleVideoTrancoder {
 	return &HandleVideoTrancoder{
-		processor: p,
-		storage:   s,
+		processor:     p,
+		storage:       s,
+		streamService: svc,
 	}
 }
 
@@ -57,6 +60,17 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 		return nil
 	}
 
+	_, err := h.streamService.UpdateStreamMetadata(ctx, &pb.UpdateStreamMetadataRequest{
+		StreamUuid: p.StreamUUID.String(),
+		Duration:   120,
+		Format:     "hls",
+		Resolution: "1280x720",
+	})
+	if err != nil {
+		slog.Error("update metadata failed", "error", err)
+		return err
+	}
+
 	slog.Info("processing", "uuid", p.StreamUUID)
 	if err := h.processor.TranscodeToHLS(ctx, inputLocal, hlsOutputDir); err != nil {
 		slog.Error("ffmpeg processed failed",
@@ -74,5 +88,14 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 		return err
 	}
 	slog.Info("transcoding success", "uuid", p.StreamUUID)
+
+	_, err = h.streamService.UpdateStreamStatus(ctx, &pb.UpdateStreamStatusRequest{
+		StreamUuid: p.StreamUUID.String(),
+		Status:     pb.Status_STATUS_READY,
+	})
+	if err != nil {
+		slog.Error("grpc notify failed", "error", err)
+		return err
+	}
 	return nil
 }

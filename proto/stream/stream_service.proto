@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package stream;
+
+option go_package = "github.com/mrhumster/transcoder-service/gen/go/stream";
+
+enum Status {
+  STATUS_DRAFT = 0;
+  STATUS_PROCESSING = 1;
+  STATUS_READY = 2;
+  STATUS_PUBLISHED = 3;
+  STATUS_ERROR = 4;
+  STATUS_UPLOADING = 5;
+}
+
+service StreamService {
+  rpc UpdateStreamStatus(UpdateStreamStatusRequest) returns (UpdateStreamStatusResponse);
+  rpc UpdateStreamMetadata(UpdateStreamMetadataRequest) returns (UpdateStreamMetadataResponse);
+  rpc UpdateStreamProcessing(UpdateStreamProcessingRequest) returns (UpdateStreamProcessingResponse);
+}
+
+message UpdateStreamStatusRequest {
+  string stream_uuid = 1;
+  Status status = 2;
+}
+
+message UpdateStreamStatusResponse {
+  bool updated = 1;
+}
+
+message UpdateStreamMetadataRequest {
+  string stream_uuid = 1;
+  int32 duration = 2;
+  int64 size = 3;
+  string format = 4;
+  string resolution = 5;
+}
+
+message UpdateStreamMetadataResponse {
+  bool updated = 1;
+}
+
+message UpdateStreamProcessingRequest {
+  string stream_uuid = 1;
+  int32 progress = 2;
+  repeated string steps = 3;
+  string error = 4;
+}
+
+message UpdateStreamProcessingResponse {
+  bool updated = 1;
+}
