@@ -26,13 +26,16 @@ spec:
       containers:
         - name: transcoder-service
           image: xomrkob/transcoder-service:latest
+          volumeMounts:
+            - mountPath: /tmp
+              name: tmp-disk
           imagePullPolicy:
           resources:
             requests:
               cpu: 800m
               memory: 512Mi
             limits:
-              cpu: 800m
+              cpu: 4000m
               memory: 1Gi
           livenessProbe:
             exec:
@@ -79,6 +82,10 @@ spec:
                 secretKeyRef:
                   name: minio-credentials
                   key: MINIO_SECRET_KEY
+      volumes:
+        - name: tmp-disk
+          emptyDir:
+            sizeLimit: 2Gi
       restartPolicy: Always
 ---
 

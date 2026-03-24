@@ -1,0 +1,19 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: transcoder-keda
+  namespace: go-app
+spec:
+  scaleTargetRef:
+    name: transcoder-service
+  minReplicaCount: 0
+  maxReplicaCount: 1
+  triggers:
+    - type: redis
+      authenticationRef:
+        name: keda-redis-auth
+      metadata:
+        address: casbin-redis-master.go-app.svc.cluster.local:6379
+        databaseIndex: "2"
+        listName: "asynq:{default}:pending"
+        listLength: "1"

@@ -24,7 +24,7 @@ func (p *FFmpegProcessor) TranscodeToHLS(ctx context.Context, inputPath, outputD
 	playlistPath := fmt.Sprintf("%s/index.m3u8", outputDir)
 	args := []string{
 		"-i", inputPath,
-		"-threads", "1",
+		"-threads", "0",
 		"-c:v", "libx264",
 		"-c:a", "aac",
 		"-b:v", "2500k",

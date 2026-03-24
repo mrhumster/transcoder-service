@@ -1,0 +1,10 @@
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: keda-redis-auth
+  namespace: go-app
+spec:
+  secretTargetRef:
+    - parameter: password
+      name: casbin-redis
+      key: redis-password

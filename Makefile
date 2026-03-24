@@ -46,3 +46,14 @@ proto:
 		--go-grpc_opt=module=$(MODULE_NAME) \
 		$(PROTO_DIR)/*.proto
 	@echo "Proto file generated in $(GEN_DIR)"
+
+keda-deploy:
+	@echo "Deploy KEDA"
+	@echo "Add helm repository"
+	helm repo add kedacore https://kedacore.github.io/charts
+	@echo "Update repo..."
+	helm repo update
+	@echo "Install..."
+	helm install keda kedacore/keda --namespace keda --create-namespace
+	@echo "Wait...."
+	kubectl wait --for=condition=Ready pod -l --all -n keda --timeout=90s
