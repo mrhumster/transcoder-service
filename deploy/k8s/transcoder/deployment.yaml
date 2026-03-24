@@ -29,11 +29,11 @@ spec:
           imagePullPolicy:
           resources:
             requests:
-              cpu: 500m
+              cpu: 800m
               memory: 512Mi
             limits:
-              cpu: 2000m
-              memory: 2Gi
+              cpu: 1000m
+              memory: 1Gi
           livenessProbe:
             exec:
               command: ["/bin/sh", "-c", "ps aux | grep worker"]

@@ -34,7 +34,7 @@ func main() {
 		Password: cfg.Redis.Passwrod,
 		DB:       2,
 	}
-	srv := asynq.NewServer(r, asynq.Config{Concurrency: 3})
+	srv := asynq.NewServer(r, asynq.Config{Concurrency: 1})
 	minioStorage, err := storage.NewMinIOStorageFromConfig(cfg.MinIO)
 	if err != nil {
 		slog.Error("error init minio storage", "error", err)
