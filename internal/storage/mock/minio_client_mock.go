@@ -56,16 +56,16 @@ func (mr *MockMinIOClientMockRecorder) FGetObject(ctx, bucketName, objectName, f
 }
 
 // FPutObject mocks base method.
-func (m *MockMinIOClient) FPutObject(ctx context.Context, bucketName, objectNmae, filePath string, opts minio.PutObjectOptions) (minio.UploadInfo, error) {
+func (m *MockMinIOClient) FPutObject(ctx context.Context, bucketName, objectName, filePath string, opts minio.PutObjectOptions) (minio.UploadInfo, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FPutObject", ctx, bucketName, objectNmae, filePath, opts)
+	ret := m.ctrl.Call(m, "FPutObject", ctx, bucketName, objectName, filePath, opts)
 	ret0, _ := ret[0].(minio.UploadInfo)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // FPutObject indicates an expected call of FPutObject.
-func (mr *MockMinIOClientMockRecorder) FPutObject(ctx, bucketName, objectNmae, filePath, opts any) *gomock.Call {
+func (mr *MockMinIOClientMockRecorder) FPutObject(ctx, bucketName, objectName, filePath, opts any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FPutObject", reflect.TypeOf((*MockMinIOClient)(nil).FPutObject), ctx, bucketName, objectNmae, filePath, opts)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FPutObject", reflect.TypeOf((*MockMinIOClient)(nil).FPutObject), ctx, bucketName, objectName, filePath, opts)
 }

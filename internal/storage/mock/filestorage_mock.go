@@ -67,3 +67,17 @@ func (mr *MockFileStorageMockRecorder) Upload(ctx, remoteKey, localPath, content
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Upload", reflect.TypeOf((*MockFileStorage)(nil).Upload), ctx, remoteKey, localPath, contentType)
 }
+
+// UploadDir mocks base method.
+func (m *MockFileStorage) UploadDir(ctx context.Context, remoteDir, localDir string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UploadDir", ctx, remoteDir, localDir)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UploadDir indicates an expected call of UploadDir.
+func (mr *MockFileStorageMockRecorder) UploadDir(ctx, remoteDir, localDir any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UploadDir", reflect.TypeOf((*MockFileStorage)(nil).UploadDir), ctx, remoteDir, localDir)
+}

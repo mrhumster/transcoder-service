@@ -9,5 +9,5 @@ import (
 
 type MinIOClient interface {
 	FGetObject(ctx context.Context, bucketName, objectName, filePath string, opts minio.GetObjectOptions) error
-	FPutObject(ctx context.Context, bucketName, objectNmae, filePath string, opts minio.PutObjectOptions) (minio.UploadInfo, error)
+	FPutObject(ctx context.Context, bucketName, objectName, filePath string, opts minio.PutObjectOptions) (minio.UploadInfo, error)
 }

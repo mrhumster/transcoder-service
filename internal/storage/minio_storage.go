@@ -15,7 +15,7 @@ type MinIOStorage struct {
 	Bucket string
 }
 
-func NewMinIOStorage(client *minio.Client, bucket string) *MinIOStorage {
+func NewMinIOStorage(client MinIOClient, bucket string) *MinIOStorage {
 	return &MinIOStorage{
 		Client: client,
 		Bucket: bucket,
@@ -55,7 +55,7 @@ func (s *MinIOStorage) UploadDir(ctx context.Context, remoteDir, localDir string
 		remoteKey := filepath.Join(remoteDir, relPath)
 		contentType := "video/MP2T"
 		if filepath.Ext(path) == ".m3u8" {
-			contentType = "video/x-mpegURL"
+			contentType = "application/x-mpegURL"
 		}
 		slog.Debug("uploading segment", "key", remoteKey)
 		return s.Upload(ctx, remoteKey, path, contentType)
