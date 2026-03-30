@@ -40,6 +40,21 @@ func (m *MockVideoProcessor) EXPECT() *MockVideoProcessorMockRecorder {
 	return m.recorder
 }
 
+// GetDuration mocks base method.
+func (m *MockVideoProcessor) GetDuration(ctx context.Context, inputPath string) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetDuration", ctx, inputPath)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetDuration indicates an expected call of GetDuration.
+func (mr *MockVideoProcessorMockRecorder) GetDuration(ctx, inputPath any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetDuration", reflect.TypeOf((*MockVideoProcessor)(nil).GetDuration), ctx, inputPath)
+}
+
 // TranscodeToHLS mocks base method.
 func (m *MockVideoProcessor) TranscodeToHLS(ctx context.Context, inputPath, outputDir string) error {
 	m.ctrl.T.Helper()

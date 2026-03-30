@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/hibiken/asynq"
 	pb "github.com/mrhumster/transcoder-service/gen/go/stream"
@@ -58,12 +59,23 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 			"inputPath", p.InputPath,
 			"inputLocal", inputLocal,
 			"error", err)
+
+		if strings.Contains(err.Error(), "does not exist") {
+			return fmt.Errorf("source missing: %w", asynq.SkipRetry)
+		}
 		return nil
 	}
 
-	_, err := h.streamService.UpdateStreamMetadata(ctx, &pb.UpdateStreamMetadataRequest{
+	duration, err := h.processor.GetDuration(ctx, inputLocal)
+	if err != nil {
+		slog.Error("failed to get duration", "error", err)
+		duration = 0
+	}
+	slog.Info("gettin duration", "value", duration)
+
+	_, err = h.streamService.UpdateStreamMetadata(ctx, &pb.UpdateStreamMetadataRequest{
 		StreamUuid: p.StreamUUID.String(),
-		Duration:   120,
+		Duration:   int32(duration),
 		Format:     "hls",
 		Resolution: "1280x720",
 	})

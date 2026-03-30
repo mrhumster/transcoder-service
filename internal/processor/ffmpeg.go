@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strconv"
+	"strings"
 )
 
 type FFmpegProcessor struct {
@@ -47,4 +49,20 @@ func (p *FFmpegProcessor) TranscodeToHLS(ctx context.Context, inputPath, outputD
 		return fmt.Errorf("ffmpeg execution failed: %w", err)
 	}
 	return nil
+}
+
+func (p *FFmpegProcessor) GetDuration(ctx context.Context, inputPath string) (float64, error) {
+	args := []string{
+		"-v", "error",
+		"-show_entries", "format=duration",
+		"-of", "default=noprint_wrappers=1:nokey=1",
+		inputPath,
+	}
+	cmd := exec.CommandContext(ctx, "ffprobe", args...)
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, nil
+	}
+	durationStr := strings.TrimSpace(string(out))
+	return strconv.ParseFloat(durationStr, 64)
 }
