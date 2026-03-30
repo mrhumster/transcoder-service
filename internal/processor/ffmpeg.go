@@ -20,7 +20,7 @@ func NewFFmpegProcessor() (*FFmpegProcessor, error) {
 	return &FFmpegProcessor{binPath: path}, nil
 }
 
-func (p *FFmpegProcessor) TranscodeToHLS(ctx context.Context, inputPath, outputDir string) error {
+func (p *FFmpegProcessor) TranscodeToHLS(ctx context.Context, inputPath, outputDir string) (err error) {
 	playlistPath := fmt.Sprintf("%s/index.m3u8", outputDir)
 	args := []string{
 		"-i", inputPath,

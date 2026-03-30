@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -73,6 +74,10 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 
 	slog.Info("processing", "uuid", p.StreamUUID)
 	if err := h.processor.TranscodeToHLS(ctx, inputLocal, hlsOutputDir); err != nil {
+		if errors.Is(ctx.Err(), context.Canceled) {
+			slog.Info("transcoding canceled, skipping retry", "uuid", p.StreamUUID)
+			return nil
+		}
 		slog.Error("ffmpeg processed failed",
 			"uuid", p.StreamUUID,
 			"error", err)
