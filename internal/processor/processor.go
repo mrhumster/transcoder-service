@@ -5,5 +5,5 @@ import "context"
 
 type VideoProcessor interface {
 	TranscodeToHLS(ctx context.Context, inputPath, outputDir string) error
-	GetDuration(ctx context.Context, inputPath string) (int64, error)
+	GetDuration(ctx context.Context, inputPath string) (float64, error)
 }
