@@ -76,7 +76,7 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 	if err := h.processor.TranscodeToHLS(ctx, inputLocal, hlsOutputDir); err != nil {
 		if errors.Is(ctx.Err(), context.Canceled) {
 			slog.Info("transcoding canceled, skipping retry", "uuid", p.StreamUUID)
-			return nil
+			return fmt.Errorf("task canceled: %w", asynq.SkipRetry)
 		}
 		slog.Error("ffmpeg processed failed",
 			"uuid", p.StreamUUID,
