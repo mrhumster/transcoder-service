@@ -3,7 +3,6 @@ package queue
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -85,15 +84,35 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 	}
 
 	slog.Info("processing", "uuid", p.StreamUUID)
-	if err := h.processor.TranscodeToHLS(ctx, inputLocal, hlsOutputDir); err != nil {
-		if errors.Is(ctx.Err(), context.Canceled) {
-			slog.Info("transcoding canceled, skipping retry", "uuid", p.StreamUUID)
-			return fmt.Errorf("task canceled: %w", asynq.SkipRetry)
+
+	progChan, errChan := h.processor.TranscodeToHLS(ctx, inputLocal, hlsOutputDir)
+
+loop:
+	for {
+		select {
+		case prog, ok := <-progChan:
+			if !ok {
+				break loop
+			}
+			updateProgReq := &pb.UpdateStreamProcessingRequest{
+				StreamUuid: p.StreamUUID.String(),
+				Progress:   int32(prog.Percent),
+			}
+			progResp, err := h.streamService.UpdateStreamProcessing(ctx, updateProgReq)
+			if err != nil {
+				slog.Error("failed send progress in stream service", "error", err)
+			} else {
+				slog.Info("send progress",
+					"response", progResp,
+					"Progress", updateProgReq.Progress,
+				)
+			}
+		case err := <-errChan:
+			return err
+		case <-ctx.Done():
+			return ctx.Err()
+
 		}
-		slog.Error("ffmpeg processed failed",
-			"uuid", p.StreamUUID,
-			"error", err)
-		return err
 	}
 
 	remoteProcessedDir := fmt.Sprintf("processed/%s", p.StreamUUID)

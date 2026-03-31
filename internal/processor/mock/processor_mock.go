@@ -13,6 +13,7 @@ import (
 	context "context"
 	reflect "reflect"
 
+	processor "github.com/mrhumster/transcoder-service/internal/processor"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -56,11 +57,12 @@ func (mr *MockVideoProcessorMockRecorder) GetDuration(ctx, inputPath any) *gomoc
 }
 
 // TranscodeToHLS mocks base method.
-func (m *MockVideoProcessor) TranscodeToHLS(ctx context.Context, inputPath, outputDir string) error {
+func (m *MockVideoProcessor) TranscodeToHLS(ctx context.Context, inputPath, outputDir string) (<-chan processor.Progress, <-chan error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "TranscodeToHLS", ctx, inputPath, outputDir)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret0, _ := ret[0].(<-chan processor.Progress)
+	ret1, _ := ret[1].(<-chan error)
+	return ret0, ret1
 }
 
 // TranscodeToHLS indicates an expected call of TranscodeToHLS.
