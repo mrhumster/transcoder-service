@@ -92,6 +92,7 @@ loop:
 		select {
 		case prog, ok := <-progChan:
 			if !ok {
+				slog.Info("channel is close", "progress", prog)
 				break loop
 			}
 			updateProgReq := &pb.UpdateStreamProcessingRequest{
