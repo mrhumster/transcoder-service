@@ -6,7 +6,7 @@ metadata:
 spec:
   scaleTargetRef:
     name: transcoder-service
-  cooldownPeriod: 3600
+  cooldownPeriod: 10
   maxReplicaCount: 1
   triggers:
     - type: redis
