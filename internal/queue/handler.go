@@ -87,6 +87,8 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 
 	progChan, errChan := h.processor.TranscodeToHLS(ctx, inputLocal, hlsOutputDir)
 
+	var lastSentPercent int32 = -1
+
 loop:
 	for {
 		select {
@@ -95,20 +97,28 @@ loop:
 				slog.Info("channel is close", "progress", prog)
 				break loop
 			}
-			updateProgReq := &pb.UpdateStreamProcessingRequest{
-				StreamUuid: p.StreamUUID.String(),
-				Progress:   int32(prog.Percent),
-			}
-			progResp, err := h.streamService.UpdateStreamProcessing(ctx, updateProgReq)
-			if err != nil {
-				slog.Error("failed send progress in stream service", "error", err)
-			} else {
-				slog.Info("send progress",
-					"response", progResp,
-					"Progress", updateProgReq.Progress,
-				)
+
+			currentPercent := int32(prog.Percent)
+			if currentPercent >= lastSentPercent+10 || currentPercent >= 100 {
+				updateProgReq := &pb.UpdateStreamProcessingRequest{
+					StreamUuid: p.StreamUUID.String(),
+					Progress:   int32(prog.Percent),
+					Steps:      []string{"convertation"},
+				}
+				_, err := h.streamService.UpdateStreamProcessing(ctx, updateProgReq)
+
+				if err != nil {
+					slog.Error("failed send progress in stream service", "error", err)
+				} else {
+					lastSentPercent = currentPercent
+					slog.Info("send progress updated", "percent", currentPercent)
+				}
 			}
 		case err := <-errChan:
+			_, grpcErr := h.streamService.UpdateStreamProcessing(ctx, &pb.UpdateStreamProcessingRequest{Error: err.Error()})
+			if err != nil {
+				slog.Error("failed send progress error to stream service", "error", grpcErr)
+			}
 			return err
 		case <-ctx.Done():
 			return ctx.Err()

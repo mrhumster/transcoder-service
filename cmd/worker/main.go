@@ -3,6 +3,7 @@ package main
 import (
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/hibiken/asynq"
 	"github.com/mrhumster/transcoder-service/config"
@@ -34,7 +35,7 @@ func main() {
 		Password: cfg.Redis.Passwrod,
 		DB:       2,
 	}
-	srv := asynq.NewServer(r, asynq.Config{Concurrency: 1})
+	srv := asynq.NewServer(r, asynq.Config{Concurrency: 1, ShutdownTimeout: 50 * time.Minute})
 	minioStorage, err := storage.NewMinIOStorageFromConfig(cfg.MinIO)
 	if err != nil {
 		slog.Error("error init minio storage", "error", err)
