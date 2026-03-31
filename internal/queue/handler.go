@@ -115,7 +115,13 @@ loop:
 				}
 			}
 		case err := <-errChan:
-			_, grpcErr := h.streamService.UpdateStreamProcessing(ctx, &pb.UpdateStreamProcessingRequest{Error: err.Error()})
+			_, grpcErr := h.streamService.UpdateStreamProcessing(ctx, &pb.UpdateStreamProcessingRequest{
+				StreamUuid: p.StreamUUID.String(),
+				Progress:   int32(lastSentPercent),
+				Steps:      []string{"convertation"},
+
+				Error: err.Error(),
+			})
 			if err != nil {
 				slog.Error("failed send progress error to stream service", "error", grpcErr)
 			}

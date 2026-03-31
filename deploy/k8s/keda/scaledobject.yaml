@@ -23,6 +23,6 @@ spec:
       metadata:
         address: casbin-redis-master.go-app.svc.cluster.local:6379
         databaseIndex: "2"
-        key: "asynq:{default}:active"
-        value: "1"
-        activationValue: "1"
+        listName: "asynq:{default}:active"
+        listLength: "1"
+        type: "zset"
