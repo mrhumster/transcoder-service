@@ -23,8 +23,8 @@ func NewFFmpegProcessor() (*FFmpegProcessor, error) {
 }
 
 func (p *FFmpegProcessor) TranscodeToHLS(ctx context.Context, inputPath, outputDir string) (<-chan Progress, <-chan error) {
-	progChan := make(chan Progress)
-	errChan := make(chan error)
+	progChan := make(chan Progress, 10)
+	errChan := make(chan error, 1)
 
 	totalDuration, _ := p.GetDuration(ctx, inputPath)
 
@@ -86,9 +86,13 @@ func (p *FFmpegProcessor) TranscodeToHLS(ctx context.Context, inputPath, outputD
 				progChan <- currenProg
 			}
 		}
+		progChan <- Progress{Percent: 100, Finished: true}
+		slog.Info("ffmpeg output stream closed, waiting for process to exit")
 
 		if err := cmd.Wait(); err != nil {
 			errChan <- fmt.Errorf("ffmpeg execution failed: %w", err)
+		} else {
+			slog.Info("ffmpeg process exited successfully")
 		}
 	}()
 	return progChan, errChan
