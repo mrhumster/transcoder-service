@@ -119,8 +119,7 @@ loop:
 				StreamUuid: p.StreamUUID.String(),
 				Progress:   int32(lastSentPercent),
 				Steps:      []string{"convertation"},
-
-				Error: err.Error(),
+				Error:      fmt.Sprintf("transcode error: %w", err),
 			})
 			if err != nil {
 				slog.Error("failed send progress error to stream service", "error", grpcErr)
