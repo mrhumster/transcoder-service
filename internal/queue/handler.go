@@ -114,13 +114,28 @@ loop:
 					slog.Info("send progress updated", "percent", currentPercent)
 				}
 			}
-		case err := <-errChan:
-			return err
+		case err, ok := <-errChan:
+			if !ok {
+				errChan = nil
+				continue
+			}
+			if err != nil {
+				h.streamService.UpdateStreamProcessing(ctx, &pb.UpdateStreamProcessingRequest{
+					StreamUuid: p.StreamUUID.String(),
+					Progress:   int32(lastSentPercent),
+					Steps:      []string{"convertation"},
+					Error:      fmt.Sprintf("failed convert: %s", err.Error()),
+				})
+				slog.Error("FFMPEG ERROR", "err", err)
+				return err
+			}
 		case <-ctx.Done():
+			slog.Warn("Context cancelled, stopping...")
 			return ctx.Err()
 
 		}
 	}
+	slog.Info("Starting upload phase", "uuid", p.StreamUUID)
 
 	remoteProcessedDir := fmt.Sprintf("processed/%s", p.StreamUUID)
 	slog.Info("uploading HLS result", "remote", remoteProcessedDir)
