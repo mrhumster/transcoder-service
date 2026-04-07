@@ -70,7 +70,7 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 		slog.Error("failed to get duration", "error", err)
 		duration = 0
 	}
-	slog.Info("gettin duration", "value", duration)
+	slog.Info("getting duration", "value", duration)
 
 	_, err = h.streamService.UpdateStreamMetadata(ctx, &pb.UpdateStreamMetadataRequest{
 		StreamUuid: p.StreamUUID.String(),
@@ -99,7 +99,7 @@ loop:
 			}
 
 			currentPercent := int32(prog.Percent)
-			if currentPercent >= lastSentPercent+10 || currentPercent >= 100 {
+			if currentPercent >= lastSentPercent+5 || currentPercent >= 100 {
 				updateProgReq := &pb.UpdateStreamProcessingRequest{
 					StreamUuid: p.StreamUUID.String(),
 					Progress:   int32(prog.Percent),
