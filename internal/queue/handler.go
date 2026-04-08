@@ -103,7 +103,7 @@ loop:
 				updateProgReq := &pb.UpdateStreamProcessingRequest{
 					StreamUuid: p.StreamUUID.String(),
 					Progress:   int32(prog.Percent),
-					Steps:      []string{"convertation"},
+					Steps:      []string{"Transcoding"},
 				}
 				_, err := h.streamService.UpdateStreamProcessing(ctx, updateProgReq)
 
@@ -123,7 +123,7 @@ loop:
 				h.streamService.UpdateStreamProcessing(ctx, &pb.UpdateStreamProcessingRequest{
 					StreamUuid: p.StreamUUID.String(),
 					Progress:   int32(lastSentPercent),
-					Steps:      []string{"convertation"},
+					Steps:      []string{"Transcoding"},
 					Error:      fmt.Sprintf("failed convert: %s", err.Error()),
 				})
 				slog.Error("FFMPEG ERROR", "err", err)
@@ -140,7 +140,7 @@ loop:
 	updateProgReq := &pb.UpdateStreamProcessingRequest{
 		StreamUuid: p.StreamUUID.String(),
 		Progress:   int32(100),
-		Steps:      []string{"uploading to the storage"},
+		Steps:      []string{"Uploading to the storage"},
 	}
 	_, err = h.streamService.UpdateStreamProcessing(ctx, updateProgReq)
 	if err != nil {
