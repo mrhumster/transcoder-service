@@ -137,6 +137,16 @@ loop:
 	}
 	slog.Info("Starting upload phase", "uuid", p.StreamUUID)
 
+	updateProgReq := &pb.UpdateStreamProcessingRequest{
+		StreamUuid: p.StreamUUID.String(),
+		Progress:   int32(100),
+		Steps:      []string{"uploading to the storage"},
+	}
+	_, err = h.streamService.UpdateStreamProcessing(ctx, updateProgReq)
+	if err != nil {
+		slog.Error("failed send progress in stream service", "error", err)
+	}
+
 	remoteProcessedDir := fmt.Sprintf("processed/%s", p.StreamUUID)
 	slog.Info("uploading HLS result", "remote", remoteProcessedDir)
 	if err := h.storage.UploadDir(ctx, remoteProcessedDir, hlsOutputDir); err != nil {
@@ -155,5 +165,16 @@ loop:
 		slog.Error("grpc notify failed", "error", err)
 		return err
 	}
+
+	updateProgReq = &pb.UpdateStreamProcessingRequest{
+		StreamUuid: p.StreamUUID.String(),
+		Progress:   int32(100),
+		Steps:      []string{},
+	}
+	_, err = h.streamService.UpdateStreamProcessing(ctx, updateProgReq)
+	if err != nil {
+		slog.Error("failed send progress in stream service", "error", err)
+	}
+
 	return nil
 }
