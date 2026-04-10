@@ -54,6 +54,6 @@ keda-deploy:
 	@echo "Update repo..."
 	helm repo update
 	@echo "Install..."
-	helm install keda kedacore/keda --namespace keda --create-namespace
+	helm upgrade --install keda kedacore/keda --namespace keda --create-namespace
 	@echo "Wait...."
-	kubectl wait --for=condition=Ready pod -l --all -n keda --timeout=90s
+	kubectl wait --for=condition=Ready pod --all -n keda --timeout=90s
