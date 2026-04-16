@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/hibiken/asynq"
 	pb "github.com/mrhumster/transcoder-service/gen/go/stream"
@@ -29,12 +30,24 @@ func NewHandleVideoTranscoder(p processor.VideoProcessor, s storage.FileStorage,
 	}
 }
 
-func getFreeSpace(path string) uint64 {
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(path, &stat); err != nil {
+func getDirSize(path string) uint64 {
+	var size int64
+	err := filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			info, err := d.Info()
+			if err == nil {
+				size += info.Size()
+			}
+		}
+		return nil
+	})
+	if err != nil {
 		return 0
 	}
-	return stat.Bavail * uint64(stat.Bsize)
+	return uint64(size)
 }
 
 func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t *asynq.Task) error {
@@ -102,7 +115,7 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 	progChan, errChan := h.processor.TranscodeToHLS(ctx, inputLocal, hlsOutputDir)
 
 	var lastSentPercent int32 = -1
-	const minFreeSpace = 100 * 1024 * 1024
+	const limit = 9 * 1024 * 1024 * 1024
 
 	for {
 		select {
@@ -112,9 +125,9 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 				progChan = nil
 				continue
 			}
-			free := getFreeSpace("/tmp")
-			if free < minFreeSpace {
-				slog.Error("CRITICAL: Out of free space, aborting", "free_bytes", free)
+			dirSize := getDirSize("/tmp")
+			if dirSize > limit {
+				slog.Error("CRITICAL: Out of free space, aborting", "size_tmp", dirSize)
 				h.streamService.UpdateStreamProcessing(ctx, &pb.UpdateStreamProcessingRequest{
 					StreamUuid: p.StreamUUID.String(),
 					Progress:   0,
@@ -137,7 +150,7 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 					slog.Error("failed send progress in stream service", "error", err)
 				} else {
 					lastSentPercent = currentPercent
-					slog.Info("send progress updated", "percent", currentPercent, "free_tmp_space", free)
+					slog.Info("send progress updated", "percent", currentPercent)
 				}
 			}
 		case err, ok := <-errChan:
