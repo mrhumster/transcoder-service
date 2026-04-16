@@ -112,7 +112,7 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 				progChan = nil
 				continue
 			}
-			free := getFreeSpace(workDir)
+			free := getFreeSpace("/tmp")
 			if free < minFreeSpace {
 				slog.Error("CRITICAL: Out of free space, aborting", "free_bytes", free)
 				h.streamService.UpdateStreamProcessing(ctx, &pb.UpdateStreamProcessingRequest{
