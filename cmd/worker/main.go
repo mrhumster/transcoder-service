@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/common-nighthawk/go-figure"
 	"github.com/hibiken/asynq"
 	"github.com/mrhumster/transcoder-service/config"
 	pb "github.com/mrhumster/transcoder-service/gen/go/stream"
@@ -16,6 +17,8 @@ import (
 )
 
 func main() {
+	wellcome := figure.NewFigure("transcoder v0.1.0", "graffiti", true)
+	wellcome.Print()
 	opts := &slog.HandlerOptions{
 		Level:     slog.LevelDebug,
 		AddSource: true,
