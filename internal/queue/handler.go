@@ -29,10 +29,12 @@ func NewHandleVideoTranscoder(p processor.VideoProcessor, s storage.FileStorage,
 	}
 }
 
-func hasFreeSpace(path string, minBytes uint64) bool {
+func getFreeSpace(path string) uint64 {
 	var stat syscall.Statfs_t
-	syscall.Statfs(path, &stat)
-	return stat.Bavail*uint64(stat.Bsize) > minBytes
+	if err := syscall.Statfs(path, &stat); err != nil {
+		return 0
+	}
+	return stat.Bavail * uint64(stat.Bsize)
 }
 
 func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t *asynq.Task) error {
@@ -100,6 +102,7 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 	progChan, errChan := h.processor.TranscodeToHLS(ctx, inputLocal, hlsOutputDir)
 
 	var lastSentPercent int32 = -1
+	const minFreeSpace = 100 * 1024 * 1024
 
 	for {
 		select {
@@ -125,6 +128,17 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 					lastSentPercent = currentPercent
 					slog.Info("send progress updated", "percent", currentPercent)
 				}
+			}
+			free := getFreeSpace(workDir)
+			if free < minFreeSpace {
+				slog.Error("CRITICAL: Out of free space, aborting", "free_bytes", free)
+				h.streamService.UpdateStreamProcessing(ctx, &pb.UpdateStreamProcessingRequest{
+					StreamUuid: p.StreamUUID.String(),
+					Progress:   0,
+					Steps:      []string{"Transcoding"},
+					Error:      "Not enough disk space on worker",
+				})
+				return fmt.Errorf("no space left: %w", asynq.SkipRetry)
 			}
 		case err, ok := <-errChan:
 			if !ok {
