@@ -3,7 +3,6 @@ package main
 import (
 	"log/slog"
 	"os"
-	"time"
 
 	"github.com/hibiken/asynq"
 	"github.com/mrhumster/transcoder-service/config"
@@ -11,6 +10,7 @@ import (
 	"github.com/mrhumster/transcoder-service/internal/processor"
 	"github.com/mrhumster/transcoder-service/internal/queue"
 	"github.com/mrhumster/transcoder-service/internal/storage"
+	"github.com/mrhumster/transcoder-service/internal/worker"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -30,24 +30,25 @@ func main() {
 		slog.Error("error load config")
 		os.Exit(1)
 	}
-	r := asynq.RedisClientOpt{
-		Addr:     cfg.Redis.Addr,
-		Password: cfg.Redis.Passwrod,
-		DB:       2,
-	}
-	srv := asynq.NewServer(r, asynq.Config{Concurrency: 1, ShutdownTimeout: 50 * time.Minute})
+
+	srv := worker.NewAsynqWorker(cfg)
+
 	minioStorage, err := storage.NewMinIOStorageFromConfig(cfg.MinIO)
 	if err != nil {
 		slog.Error("error init minio storage", "error", err)
 		os.Exit(1)
 	}
+
 	ffmpeg, err := processor.NewFFmpegProcessor()
 	if err != nil {
 		slog.Error("error init processor", "error", err)
 		os.Exit(1)
 	}
 
-	conn, err := grpc.NewClient(cfg.Server.StreamSeviceAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(
+		cfg.Server.StreamSeviceAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
 	if err != nil {
 		slog.Error("error init gRPC client: %w", "error", err)
 		os.Exit(1)

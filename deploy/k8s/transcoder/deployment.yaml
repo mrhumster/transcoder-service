@@ -47,50 +47,18 @@ spec:
               command: ["/bin/sh", "-c", "ps aux | grep worker"]
             initialDelaySeconds: 5
             periodSeconds: 10
-          env:
-            - name: STREAM_SERVICE_ADDR
-              value: stream-service:50051
-            - name: REDIS_ADDR
-              value: casbin-redis-master:6379
-            - name: REDIS_PASS
-              valueFrom:
-                secretKeyRef:
-                  name: casbin-redis
-                  key: redis-password
-            - name: MINIO_ENDPOINT
-              valueFrom:
-                configMapKeyRef:
-                  name: go-app-config
-                  key: MINIO_ENDPOINT
-            - name: MINIO_BUCKET_NAME
-              valueFrom:
-                configMapKeyRef:
-                  name: go-app-config
-                  key: MINIO_BUCKET_NAME
-            - name: MINIO_USE_SSL
-              valueFrom:
-                configMapKeyRef:
-                  name: go-app-config
-                  key: MINIO_USE_SSL
-            - name: MINIO_REGION
-              valueFrom:
-                configMapKeyRef:
-                  name: go-app-config
-                  key: MINIO_REGION
-            - name: MINIO_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: minio-credentials
-                  key: MINIO_ACCESS_KEY
-            - name: MINIO_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: minio-credentials
-                  key: MINIO_SECRET_KEY
+          envFrom:
+            - configMapRef:
+                name: transcoder-service-config
+            - configMapRef:
+                name: go-app-config
+            - secretRef:
+                name: casbin-redis
+            - secretRef:
+                name: minio-credentials
       volumes:
         - name: tmp-disk
           emptyDir:
             sizeLimit: 10Gi
       restartPolicy: Always
 ---
-

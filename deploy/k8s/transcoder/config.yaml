@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: transcoder-service-config
+  namespace: go-app
+data:
+  STREAM_SERVICE_ADDR: stream-service:50051
+  REDIS_ADDR: casbin-redis-master:6379
+  WORKER_CONCURRENCY: "1"
+  WORKER_SHUTDOWN_TIMEOUT: "50m"
+---
