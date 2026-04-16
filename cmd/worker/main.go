@@ -34,8 +34,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	srv := worker.NewAsynqWorker(cfg)
-
 	minioStorage, err := storage.NewMinIOStorageFromConfig(cfg.MinIO)
 	if err != nil {
 		slog.Error("error init minio storage", "error", err)
@@ -61,6 +59,7 @@ func main() {
 
 	streamServiceClient := pb.NewStreamServiceClient(conn)
 
+	srv := worker.NewAsynqWorker(cfg, streamServiceClient)
 	hanlder := queue.NewHandleVideoTranscoder(ffmpeg, minioStorage, streamServiceClient)
 	mux := asynq.NewServeMux()
 	mux.HandleFunc(queue.TaskVideoTranscoding, hanlder.HandleVideoTranscoderTask)
