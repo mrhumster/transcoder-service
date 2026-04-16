@@ -112,6 +112,17 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 				progChan = nil
 				continue
 			}
+			free := getFreeSpace(workDir)
+			if free < minFreeSpace {
+				slog.Error("CRITICAL: Out of free space, aborting", "free_bytes", free)
+				h.streamService.UpdateStreamProcessing(ctx, &pb.UpdateStreamProcessingRequest{
+					StreamUuid: p.StreamUUID.String(),
+					Progress:   0,
+					Steps:      []string{"Transcoding"},
+					Error:      "Not enough disk space on worker",
+				})
+				return fmt.Errorf("no space left: %w", asynq.SkipRetry)
+			}
 
 			currentPercent := int32(prog.Percent)
 			if currentPercent >= lastSentPercent+5 || currentPercent >= 100 {
@@ -126,19 +137,8 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 					slog.Error("failed send progress in stream service", "error", err)
 				} else {
 					lastSentPercent = currentPercent
-					slog.Info("send progress updated", "percent", currentPercent)
+					slog.Info("send progress updated", "percent", currentPercent, "free_tmp_space", free)
 				}
-			}
-			free := getFreeSpace(workDir)
-			if free < minFreeSpace {
-				slog.Error("CRITICAL: Out of free space, aborting", "free_bytes", free)
-				h.streamService.UpdateStreamProcessing(ctx, &pb.UpdateStreamProcessingRequest{
-					StreamUuid: p.StreamUUID.String(),
-					Progress:   0,
-					Steps:      []string{"Transcoding"},
-					Error:      "Not enough disk space on worker",
-				})
-				return fmt.Errorf("no space left: %w", asynq.SkipRetry)
 			}
 		case err, ok := <-errChan:
 			if !ok {
