@@ -59,6 +59,6 @@ spec:
       volumes:
         - name: tmp-disk
           emptyDir:
-            sizeLimit: 10Gi
+            sizeLimit: 10Mi
       restartPolicy: Always
 ---

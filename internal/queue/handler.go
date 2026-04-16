@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"syscall"
 
 	"github.com/hibiken/asynq"
 	pb "github.com/mrhumster/transcoder-service/gen/go/stream"
@@ -15,9 +16,9 @@ import (
 )
 
 type HandleVideoTrancoder struct {
-	processor     processor.VideoProcessor
-	storage       storage.FileStorage
-	streamService pb.StreamServiceClient
+	processor     processor.VideoProcessor // convert video
+	storage       storage.FileStorage      // save to cloud
+	streamService pb.StreamServiceClient   // update in db
 }
 
 func NewHandleVideoTranscoder(p processor.VideoProcessor, s storage.FileStorage, svc pb.StreamServiceClient) *HandleVideoTrancoder {
@@ -26,6 +27,12 @@ func NewHandleVideoTranscoder(p processor.VideoProcessor, s storage.FileStorage,
 		storage:       s,
 		streamService: svc,
 	}
+}
+
+func hasFreeSpace(path string, minBytes uint64) bool {
+	var stat syscall.Statfs_t
+	syscall.Statfs(path, &stat)
+	return stat.Bavail*uint64(stat.Bsize) > minBytes
 }
 
 func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t *asynq.Task) error {
@@ -37,8 +44,8 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 	workDir := fmt.Sprintf("/tmp/%s", p.StreamUUID)
 	inputLocal := workDir + "/input.mp4"
 	hlsOutputDir := workDir + "/hls"
-
 	outputDir := fmt.Sprintf("/tmp/%s", p.StreamUUID)
+
 	if err := os.Mkdir(outputDir, 0o755); err != nil {
 		slog.Error("error creating temp dir", "error", err)
 		return err
@@ -62,6 +69,11 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 		if strings.Contains(err.Error(), "does not exist") {
 			return fmt.Errorf("source missing: %w", asynq.SkipRetry)
 		}
+
+		if strings.Contains(err.Error(), "no space left on device") {
+			return fmt.Errorf("disk full: %w", asynq.SkipRetry)
+		}
+
 		return nil
 	}
 
@@ -89,13 +101,13 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 
 	var lastSentPercent int32 = -1
 
-loop:
 	for {
 		select {
 		case prog, ok := <-progChan:
 			if !ok {
 				slog.Info("channel is close", "progress", prog)
-				break loop
+				progChan = nil
+				continue
 			}
 
 			currentPercent := int32(prog.Percent)
@@ -116,7 +128,9 @@ loop:
 			}
 		case err, ok := <-errChan:
 			if !ok {
-				errChan = nil
+				if progChan == nil {
+					goto upload
+				}
 				continue
 			}
 			if err != nil {
@@ -127,14 +141,21 @@ loop:
 					Error:      fmt.Sprintf("failed convert: %s", err.Error()),
 				})
 				slog.Error("FFMPEG ERROR", "err", err)
+				if strings.Contains(err.Error(), "no space left on device") {
+					return fmt.Errorf("disk full: %w", asynq.SkipRetry)
+				}
 				return err
 			}
 		case <-ctx.Done():
 			slog.Warn("Context cancelled, stopping...")
 			return ctx.Err()
+		}
 
+		if progChan == nil && errChan == nil {
+			break
 		}
 	}
+upload:
 	slog.Info("Starting upload phase", "uuid", p.StreamUUID)
 
 	updateProgReq := &pb.UpdateStreamProcessingRequest{
