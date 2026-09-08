@@ -34,7 +34,7 @@ spec:
           volumeMounts:
             - mountPath: /tmp
               name: tmp-disk
-          imagePullPolicy:
+          imagePullPolicy: Always
           resources:
             requests:
               cpu: 800m
