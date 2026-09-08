@@ -73,7 +73,6 @@ spec:
         - name: grpc-tls
           secret:
             secretName: grpc-transcoder-tls
-      volumes:
         - name: tmp-disk
           emptyDir:
             sizeLimit: 10Gi
