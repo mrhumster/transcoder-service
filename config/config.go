@@ -21,6 +21,10 @@ type Worker struct {
 
 type Server struct {
 	StreamSeviceAddr string
+	GRPCTLSCertFile  string
+	GRPCTLSKeyFile   string
+	GRPCTLSCAFile    string
+	GRPCTLSEnabled   bool
 }
 
 type Redis struct {
@@ -77,6 +81,10 @@ func LoadConfig() (*Config, error) {
 		},
 		Server: Server{
 			StreamSeviceAddr: getEnv("STREAM_SERVICE_ADDR", "localhost:50051"),
+			GRPCTLSCertFile:  os.Getenv("GRPC_TLS_CERT"),
+			GRPCTLSKeyFile:   os.Getenv("GRPC_TLS_KEY"),
+			GRPCTLSCAFile:    os.Getenv("GRPC_TLS_CA"),
+			GRPCTLSEnabled:   getBool("GRPC_TLS_ENABLED"),
 		},
 		Worker: Worker{
 			Concurrency:     int(concurrency),
@@ -90,4 +98,9 @@ func getEnv(key, defaultValue string) string {
 		return val
 	}
 	return defaultValue
+}
+
+func getBool(key string) bool {
+	v, _ := strconv.ParseBool(os.Getenv(key))
+	return v
 }

@@ -56,6 +56,23 @@ spec:
                 name: casbin-redis
             - secretRef:
                 name: minio-credentials
+          env:
+            - name: GRPC_TLS_ENABLED
+              value: "true"
+            - name: GRPC_TLS_CERT
+              value: "/tls/grpc/tls.crt"
+            - name: GRPC_TLS_KEY
+              value: "/tls/grpc/tls.key"
+            - name: GRPC_TLS_CA
+              value: "/tls/grpc/ca.crt"
+          volumeMounts:
+            - mountPath: /tls/grpc
+              name: grpc-tls
+              readOnly: true
+      volumes:
+        - name: grpc-tls
+          secret:
+            secretName: grpc-transcoder-tls
       volumes:
         - name: tmp-disk
           emptyDir:
