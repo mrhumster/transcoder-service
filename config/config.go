@@ -20,16 +20,16 @@ type Worker struct {
 }
 
 type Server struct {
-	StreamSeviceAddr string
-	GRPCTLSCertFile  string
-	GRPCTLSKeyFile   string
-	GRPCTLSCAFile    string
-	GRPCTLSEnabled   bool
+	StreamServiceAddr string
+	GRPCTLSCertFile   string
+	GRPCTLSKeyFile    string
+	GRPCTLSCAFile     string
+	GRPCTLSEnabled    bool
 }
 
 type Redis struct {
 	Addr     string
-	Passwrod string
+	Password string
 	DB       int
 }
 
@@ -68,7 +68,7 @@ func LoadConfig() (*Config, error) {
 	return &Config{
 		Redis: Redis{
 			Addr:     getEnv("REDIS_ADDR", "localhost"),
-			Passwrod: getEnv("redis-password", ""),
+			Password: getEnv("redis-password", ""),
 			DB:       int(redisDB),
 		},
 		MinIO: MinIO{
@@ -80,11 +80,11 @@ func LoadConfig() (*Config, error) {
 			Region:          getEnv("MINIO_REGION", "ru-east-1"),
 		},
 		Server: Server{
-			StreamSeviceAddr: getEnv("STREAM_SERVICE_ADDR", "localhost:50051"),
-			GRPCTLSCertFile:  os.Getenv("GRPC_TLS_CERT"),
-			GRPCTLSKeyFile:   os.Getenv("GRPC_TLS_KEY"),
-			GRPCTLSCAFile:    os.Getenv("GRPC_TLS_CA"),
-			GRPCTLSEnabled:   getBool("GRPC_TLS_ENABLED"),
+			StreamServiceAddr: getEnv("STREAM_SERVICE_ADDR", "localhost:50051"),
+			GRPCTLSCertFile:   os.Getenv("GRPC_TLS_CERT"),
+			GRPCTLSKeyFile:    os.Getenv("GRPC_TLS_KEY"),
+			GRPCTLSCAFile:     os.Getenv("GRPC_TLS_CA"),
+			GRPCTLSEnabled:    getBool("GRPC_TLS_ENABLED"),
 		},
 		Worker: Worker{
 			Concurrency:     int(concurrency),
