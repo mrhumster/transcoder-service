@@ -5,10 +5,10 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
-	"github.com/mrhumster/transcoder-service/config"
+	sharedconfig "github.com/mrhumster/go-shared/config"
 )
 
-func NewMinIOStorageFromConfig(cfg config.MinIO) (*MinIOStorage, error) {
+func NewMinIOStorageFromConfig(cfg sharedconfig.MinIO) (*MinIOStorage, error) {
 	client, err := minio.New(cfg.Endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.AccessKeyID, cfg.SecretAccessKey, ""),
 		Secure: cfg.UseSSL,

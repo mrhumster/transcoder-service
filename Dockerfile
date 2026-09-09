@@ -24,7 +24,6 @@ RUN addgroup -g 1000 appgroup && \
   adduser -D -u 1000 -G appgroup appuser
 WORKDIR /app 
 COPY --from=builder --chown=appuser:appgroup /app/transcoder-worker .
-COPY --from=builder --chown=appuser:appgroup /app/config ./config
 EXPOSE 8080
 
 USER appuser

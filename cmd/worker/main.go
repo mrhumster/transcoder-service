@@ -9,9 +9,9 @@ import (
 
 	"github.com/common-nighthawk/go-figure"
 	"github.com/hibiken/asynq"
+	sharedconfig "github.com/mrhumster/go-shared/config"
 	sharedgrpctls "github.com/mrhumster/go-shared/grpctls"
 	sharedworker "github.com/mrhumster/go-shared/worker"
-	"github.com/mrhumster/transcoder-service/config"
 	pb "github.com/mrhumster/transcoder-service/gen/go/stream"
 	"github.com/mrhumster/transcoder-service/internal/processor"
 	"github.com/mrhumster/transcoder-service/internal/queue"
@@ -37,7 +37,7 @@ func main() {
 
 	slog.SetDefault(logger)
 
-	cfg, err := config.LoadConfig()
+	cfg, err := sharedconfig.LoadConfig()
 	if err != nil {
 		slog.Error("error load config")
 		os.Exit(1)
