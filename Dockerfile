@@ -3,11 +3,12 @@ ARG VERSION=0.0.1
 ARG BUILD_DATE=11.03.2026
 
 WORKDIR /app
-COPY go.mod ./ 
+COPY transcoder-service/go.mod ./
 
-RUN if [ -f go.sum ]; then cp go.sum .; fi
+RUN if [ -f transcoder-service/go.sum ]; then cp transcoder-service/go.sum .; fi
+COPY shared /shared
 RUN go mod download
-COPY . .
+COPY transcoder-service/. .
 RUN CGO_ENABLED=0 GOOS=linux go build \
   -ldflags="-w -s -X main.version=$VERSION -X main.buildDate=$BUILD_DATE" \
   -o transcoder-worker ./cmd/worker/main.go

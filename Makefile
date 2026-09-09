@@ -14,11 +14,11 @@ all: build push deploy
 
 build:
 	@echo "Building docker image $(IMAGE_NAME):$(VERSION)..."
-	docker build \
+	docker build -f Dockerfile \
 		--build-arg VERSION=$(VERSION) \
 		--build-arg BUILD_DATE=$(BUILD_DATE) \
 		-t $(IMAGE_NAME):$(VERSION) \
-		-t $(IMAGE_NAME):latest .
+		-t $(IMAGE_NAME):latest ..
 
 push:
 	@echo "Pushing image $(IMAGE_NAME):$(VERSION)..."
