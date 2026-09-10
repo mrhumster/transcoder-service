@@ -20,12 +20,18 @@ spec:
     metadata:
       annotations:
         kubectl.kubernetes.io/default-container: transcoder-service
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
       labels:
         app: transcoder-service
     spec:
       terminationGracePeriodSeconds: 3600
       containers:
         - name: transcoder-service
+          ports:
+            - name: metrics
+              containerPort: 9090
           lifecycle:
             preStop:
               exec:
@@ -43,8 +49,9 @@ spec:
               cpu: 4000m
               memory: 1Gi
           livenessProbe:
-            exec:
-              command: ["/bin/sh", "-c", "ps aux | grep worker"]
+            httpGet:
+              path: /metrics
+              port: metrics
             initialDelaySeconds: 5
             periodSeconds: 10
           envFrom:
