@@ -45,6 +45,7 @@ message UpdateStreamProcessingRequest {
   int32 progress = 2;
   repeated string steps = 3;
   string error = 4;
+  string task = 5;
 }
 
 message UpdateStreamProcessingResponse {

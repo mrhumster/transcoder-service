@@ -149,6 +149,7 @@ func (h *HandleVideoTrancoder) handleTranscode(ctx context.Context, p VideoTrans
 					StreamUuid: p.StreamUUID.String(),
 					Progress:   0,
 					Steps:      []string{"Transcoding"},
+					Task:       "transcode",
 					Error:      "Not enough disk space on worker",
 				})
 				metrics.DiskFull.Inc()
@@ -161,6 +162,7 @@ func (h *HandleVideoTrancoder) handleTranscode(ctx context.Context, p VideoTrans
 					StreamUuid: p.StreamUUID.String(),
 					Progress:   int32(prog.Percent),
 					Steps:      []string{"Transcoding"},
+					Task:       "transcode",
 				}
 				_, err := h.streamService.UpdateStreamProcessing(ctx, updateProgReq)
 
@@ -183,6 +185,7 @@ func (h *HandleVideoTrancoder) handleTranscode(ctx context.Context, p VideoTrans
 					StreamUuid: p.StreamUUID.String(),
 					Progress:   int32(lastSentPercent),
 					Steps:      []string{"Transcoding"},
+					Task:       "transcode",
 					Error:      fmt.Sprintf("failed convert: %s", err.Error()),
 				})
 				slog.Error("FFMPEG ERROR", "err", err)
@@ -208,6 +211,7 @@ upload:
 		StreamUuid: p.StreamUUID.String(),
 		Progress:   int32(100),
 		Steps:      []string{"Uploading to the storage"},
+		Task:       "transcode",
 	}
 	_, err = h.streamService.UpdateStreamProcessing(ctx, updateProgReq)
 	if err != nil {
@@ -237,6 +241,7 @@ upload:
 		StreamUuid: p.StreamUUID.String(),
 		Progress:   int32(100),
 		Steps:      []string{},
+		Task:       "transcode",
 	}
 	_, err = h.streamService.UpdateStreamProcessing(ctx, updateProgReq)
 	if err != nil {

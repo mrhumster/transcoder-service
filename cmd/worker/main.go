@@ -88,6 +88,7 @@ func main() {
 			Progress:   0,
 			Steps:      []string{"Processing"},
 			Error:      fmt.Sprintf("Worker died or resourse limit exceeded: %v", err),
+			Task:       "transcode",
 		})
 	}
 
