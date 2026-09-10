@@ -17,7 +17,7 @@ spec:
         address: casbin-redis-master.go-app.svc.cluster.local:6379
         databaseIndex: "2"
         listName: "asynq:{default}:pending"
-        listLength: "1"
+        listLength: "2"
     - type: redis
       authenticationRef:
         name: keda-redis-auth
@@ -25,5 +25,5 @@ spec:
         address: casbin-redis-master.go-app.svc.cluster.local:6379
         databaseIndex: "2"
         listName: "asynq:{default}:active"
-        listLength: "1"
+        listLength: "2"
         type: "zset"
