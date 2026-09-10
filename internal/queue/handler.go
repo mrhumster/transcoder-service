@@ -10,8 +10,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"time"
+
 	"github.com/hibiken/asynq"
 	pb "github.com/mrhumster/transcoder-service/gen/go/stream"
+	"github.com/mrhumster/transcoder-service/internal/metrics"
 	"github.com/mrhumster/transcoder-service/internal/processor"
 	"github.com/mrhumster/transcoder-service/internal/storage"
 )
@@ -56,6 +59,19 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 		return fmt.Errorf("json unmarshal failed: %v", err)
 	}
 
+	start := time.Now()
+	taskErr := h.handleTranscode(ctx, p)
+	if taskErr != nil {
+		metrics.Errors.Inc()
+	} else {
+		metrics.Processed.Inc()
+		metrics.Duration.Observe(time.Since(start).Seconds())
+	}
+	return taskErr
+}
+
+func (h *HandleVideoTrancoder) handleTranscode(ctx context.Context, p VideoTranscodingPayload) error {
+
 	workDir := fmt.Sprintf("/tmp/%s", p.StreamUUID)
 	inputLocal := workDir + "/input.mp4"
 	hlsOutputDir := workDir + "/hls"
@@ -86,6 +102,7 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 		}
 
 		if strings.Contains(err.Error(), "no space left on device") {
+			metrics.DiskFull.Inc()
 			return fmt.Errorf("disk full: %w", asynq.SkipRetry)
 		}
 
@@ -134,6 +151,7 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 					Steps:      []string{"Transcoding"},
 					Error:      "Not enough disk space on worker",
 				})
+				metrics.DiskFull.Inc()
 				return fmt.Errorf("no space left: %w", asynq.SkipRetry)
 			}
 
@@ -174,6 +192,7 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 				return err
 			}
 		case <-ctx.Done():
+			metrics.Aborted.Inc()
 			slog.Warn("Context cancelled, stopping...")
 			return ctx.Err()
 		}

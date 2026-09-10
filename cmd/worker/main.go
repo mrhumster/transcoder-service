@@ -11,6 +11,7 @@ import (
 	"github.com/hibiken/asynq"
 	sharedconfig "github.com/mrhumster/go-shared/config"
 	sharedgrpctls "github.com/mrhumster/go-shared/grpctls"
+	sharedmetrics "github.com/mrhumster/go-shared/metrics"
 	sharedworker "github.com/mrhumster/go-shared/worker"
 	pb "github.com/mrhumster/transcoder-service/gen/go/stream"
 	"github.com/mrhumster/transcoder-service/internal/processor"
@@ -97,6 +98,7 @@ func main() {
 		Concurrency:     cfg.Worker.Concurrency,
 		ShutdownTimeout: cfg.Worker.ShutdownTimeout,
 		ErrorReporter:   reportTranscodeError,
+		MetricsAddr:     cfg.Server.MetricsAddr,
 	})
 	if err != nil {
 		slog.Error("error init asynq worker", "error", err)
@@ -105,7 +107,7 @@ func main() {
 
 	hanlder := queue.NewHandleVideoTranscoder(ffmpeg, minioStorage, streamServiceClient)
 	mux := asynq.NewServeMux()
-	mux.HandleFunc(queue.TaskVideoTranscoding, hanlder.HandleVideoTranscoderTask)
+	mux.HandleFunc(queue.TaskVideoTranscoding, sharedmetrics.Instrument(queue.TaskVideoTranscoding, hanlder.HandleVideoTranscoderTask))
 
 	slog.Info("Transoder Worker started...")
 	if err := srv.Run(mux); err != nil {
