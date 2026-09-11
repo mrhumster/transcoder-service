@@ -39,7 +39,27 @@ Plus shared asynq-task metrics from `go-shared/metrics`. Kubernetes liveness pro
 Loaded from env by `sharedconfig.LoadConfig()` (root `.env` → `transcoder-service-config`
 ConfigMap). See `services/shared/README.md` for the full variable list; the relevant ones:
 `REDIS_ADDR`, `MINIO_ENDPOINT`/`MINIO_ACCESS_KEY`/`MINIO_SECRET_KEY`/`MINIO_BUCKET_NAME`,
-`STREAM_SERVICE_ADDRESS`, `GRPC_TLS_*`, `METRICS_ADDR`.
+`STREAM_SERVICE_ADDRESS`, `GRPC_TLS_*`, `METRICS_ADDR`, `TRANSCODER_ENCODER`.
+
+## GPU encoding (VAAPI)
+
+The transcode encoder is selectable via `TRANSCODER_ENCODER`:
+
+| Value | Encoder | Requirement |
+|---|---|---|
+| `auto` (default) | `h264_vaapi` if a render node + driver are available, else `libx264` | none |
+| `cpu` | `libx264` (software) | none |
+| `vaapi` | `h264_vaapi` (forces hardware encode; falls back to `libx264` with a warning) | `/dev/dri/renderD128` |
+
+`auto` probes `/dev/dri/renderD128` (e.g. AMD/NVIDIA/Intel GPUs exposed by Mesa) and checks
+`ffmpeg -encoders` for `h264_vaapi`; if either is missing it logs the reason and silently
+falls back to CPU encoding. VAAPI builds drop `-threads` and add `-vaapi_device`
+`/dev/dri/renderD128` before `-i` plus `-vf format=nv12,hwupload`.
+
+Built for **AMD RX 5700 XT** (RDNA) — no NVENC/CUDA needed on that card. The image includes
+`libva` + `mesa-dri-gallium` and a symlink `/usr/lib/dri/radeonsi_dri.so → ../../xorg/modules/dri/radeonsi_dri.so`
+so libva finds the radeonsi driver; `h264_vaapi` ships in the Alpine 3.18 ffmpeg package
+(no source build). macOS/WSL dev hosts without `/dev/dri` just run `cpu`.
 
 ## Deployment
 
@@ -54,6 +74,15 @@ deploy/k8s/
     ├── deployment.yaml     # image xomrkob/transcoder-service:<git-tag>, metrics containerPort
     └── service.yaml        # ClusterIP for :9090 metrics scraping
 ```
+
+The Deployment is GPU-ready out of the box:
+
+- `hostPath /dev/dri` (DirectoryOrCreate) mounted at `/dev/dri` so VAAPI can reach the render node;
+- `securityContext.runAsUser: 0` (homelab convenience — a GPU device plugin would be cleaner);
+- `terminationGracePeriodSeconds: 300` (down from 3600) — long transcode terminations no longer
+  wedge rolling updates;
+- `nodeSelector`/`tolerations` for a `gpu=true` node are present but **commented out** — enable them
+  once a GPU-capable k3s agent (`--node-label gpu=true`) joins. Without them the pod schedules on any core.
 
 Build/push/deploy: `make build push deploy` (image `xomrkob/transcoder-service:<git-tag>`).
 

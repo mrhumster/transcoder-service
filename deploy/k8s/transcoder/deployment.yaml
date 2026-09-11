@@ -26,9 +26,19 @@ spec:
       labels:
         app: transcoder-service
     spec:
-      terminationGracePeriodSeconds: 3600
+      terminationGracePeriodSeconds: 300
+      # GPU node (RX 5700 XT, AMD). Enable when the k3s agent with a GPU joins:
+      # add its node label `gpu=true` and set:
+      # nodeSelector:
+      #   gpu: "true"
+      # tolerations:
+      # - key: "gpu"
+      #   operator: "Exists"
+      #   effect: "NoSchedule"
       containers:
         - name: transcoder-service
+          image: xomrkob/transcoder-service:latest
+          imagePullPolicy: Always
           ports:
             - name: metrics
               containerPort: 9090
@@ -36,11 +46,6 @@ spec:
             preStop:
               exec:
                 command: ["sh", "-c", "sleep 5"]
-          image: xomrkob/transcoder-service:latest
-          volumeMounts:
-            - mountPath: /tmp
-              name: tmp-disk
-          imagePullPolicy: Always
           resources:
             requests:
               cpu: 250m
@@ -54,6 +59,9 @@ spec:
               port: metrics
             initialDelaySeconds: 5
             periodSeconds: 10
+          securityContext:
+            # root required for VAAPI /dev/dri access (homelab-only)
+            runAsUser: 0
           envFrom:
             - configMapRef:
                 name: transcoder-service-config
@@ -73,9 +81,13 @@ spec:
             - name: GRPC_TLS_CA
               value: "/tls/grpc/ca.crt"
           volumeMounts:
-            - mountPath: /tls/grpc
-              name: grpc-tls
+            - name: grpc-tls
+              mountPath: /tls/grpc
               readOnly: true
+            - name: tmp-disk
+              mountPath: /tmp
+            - name: gpu-dri
+              mountPath: /dev/dri
       volumes:
         - name: grpc-tls
           secret:
@@ -83,5 +95,8 @@ spec:
         - name: tmp-disk
           emptyDir:
             sizeLimit: 10Gi
+        - name: gpu-dri
+          hostPath:
+            path: /dev/dri
+            type: DirectoryOrCreate
       restartPolicy: Always
----

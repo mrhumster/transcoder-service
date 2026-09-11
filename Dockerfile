@@ -19,7 +19,10 @@ ARG BUILD_DATE=11.03.2026
 LABEL version=$VERSION \
   build-date=$BUILD_DATE \
   maintainer="me@xomrkob.ru"
-RUN apk add --no-cache ffmpeg ca-certificates
+RUN apk add --no-cache ffmpeg ca-certificates libva mesa-dri-gallium
+# libva looks for DRI drivers in /usr/lib/dri; Alpine ships them under xorg modules dir.
+RUN mkdir -p /usr/lib/dri && \
+  ln -sf ../xorg/modules/dri/radeonsi_dri.so /usr/lib/dri/radeonsi_dri.so
 RUN addgroup -g 1000 appgroup && \
   adduser -D -u 1000 -G appgroup appuser
 WORKDIR /app 

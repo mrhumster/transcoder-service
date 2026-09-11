@@ -50,11 +50,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	ffmpeg, err := processor.NewFFmpegProcessor()
+	ffmpeg, err := processor.NewFFmpegProcessor(cfg.Transcoder.Encoder)
 	if err != nil {
 		slog.Error("error init processor", "error", err)
 		os.Exit(1)
 	}
+	slog.Info("transcoder encoder", "encoder", ffmpeg.Encoder())
 
 	creds := insecure.NewCredentials()
 	if cfg.Server.GRPCTLSEnabled {
