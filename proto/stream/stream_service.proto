@@ -34,6 +34,9 @@ message UpdateStreamMetadataRequest {
   int64 size = 3;
   string format = 4;
   string resolution = 5;
+  string recorded_at = 6;
+  string location = 7;
+  string camera = 8;
 }
 
 message UpdateStreamMetadataResponse {

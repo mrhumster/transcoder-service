@@ -56,6 +56,21 @@ func (mr *MockVideoProcessorMockRecorder) GetDuration(ctx, inputPath any) *gomoc
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetDuration", reflect.TypeOf((*MockVideoProcessor)(nil).GetDuration), ctx, inputPath)
 }
 
+// ProbeMetadata mocks base method.
+func (m *MockVideoProcessor) ProbeMetadata(ctx context.Context, inputPath string) (processor.VideoMetadata, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ProbeMetadata", ctx, inputPath)
+	ret0, _ := ret[0].(processor.VideoMetadata)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ProbeMetadata indicates an expected call of ProbeMetadata.
+func (mr *MockVideoProcessorMockRecorder) ProbeMetadata(ctx, inputPath any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProbeMetadata", reflect.TypeOf((*MockVideoProcessor)(nil).ProbeMetadata), ctx, inputPath)
+}
+
 // TranscodeToHLS mocks base method.
 func (m *MockVideoProcessor) TranscodeToHLS(ctx context.Context, inputPath, outputDir string) (<-chan processor.Progress, <-chan error) {
 	m.ctrl.T.Helper()

@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"github.com/mrhumster/transcoder-service/gen/go/stream"
+	"github.com/mrhumster/transcoder-service/internal/processor"
 	mockProc "github.com/mrhumster/transcoder-service/internal/processor/mock"
 	mockSvc "github.com/mrhumster/transcoder-service/internal/service/mock"
 	mockStor "github.com/mrhumster/transcoder-service/internal/storage/mock"
@@ -45,6 +46,9 @@ func TestHandle_HandleVideoTranscoderTask(t *testing.T) {
 				payload.InputPath,
 				gomock.Any()).
 			Return(nil)
+		mockProcessor.EXPECT().
+			ProbeMetadata(gomock.Any(), gomock.Any()).
+			Return(processor.VideoMetadata{}, nil)
 		mockService.EXPECT().
 			UpdateStreamMetadata(
 				gomock.Any(),
@@ -128,6 +132,9 @@ func TestHandle_HandleVideoTranscoderTask(t *testing.T) {
 				payload.InputPath,
 				gomock.Any()).
 			Return(nil)
+		mockProcessor.EXPECT().
+			ProbeMetadata(gomock.Any(), gomock.Any()).
+			Return(processor.VideoMetadata{}, nil)
 		mockService.EXPECT().
 			UpdateStreamMetadata(
 				gomock.Any(),
@@ -176,6 +183,9 @@ func TestHandle_HandleVideoTranscoderTask(t *testing.T) {
 				payload.InputPath,
 				gomock.Any()).
 			Return(nil)
+		mockProcessor.EXPECT().
+			ProbeMetadata(gomock.Any(), gomock.Any()).
+			Return(processor.VideoMetadata{}, nil)
 		mockService.EXPECT().
 			UpdateStreamMetadata(
 				gomock.Any(),
@@ -229,6 +239,9 @@ func TestHandle_HandleVideoTranscoderTask(t *testing.T) {
 				payload.InputPath,
 				gomock.Any()).
 			Return(nil)
+		mockProcessor.EXPECT().
+			ProbeMetadata(gomock.Any(), gomock.Any()).
+			Return(processor.VideoMetadata{}, nil)
 		mockService.EXPECT().
 			UpdateStreamMetadata(
 				gomock.Any(),
@@ -265,6 +278,9 @@ func TestHandle_HandleVideoTranscoderTask(t *testing.T) {
 				payload.InputPath,
 				gomock.Any()).
 			Return(nil)
+		mockProcessor.EXPECT().
+			ProbeMetadata(gomock.Any(), gomock.Any()).
+			Return(processor.VideoMetadata{}, nil)
 		mockService.EXPECT().
 			UpdateStreamMetadata(
 				gomock.Any(),

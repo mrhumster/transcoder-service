@@ -109,18 +109,31 @@ func (h *HandleVideoTrancoder) handleTranscode(ctx context.Context, p VideoTrans
 		return nil
 	}
 
-	duration, err := h.processor.GetDuration(ctx, inputLocal)
+	meta, err := h.processor.ProbeMetadata(ctx, inputLocal)
 	if err != nil {
-		slog.Error("failed to get duration", "error", err)
-		duration = 0
+		slog.Error("metadata probe failed", "error", err)
 	}
-	slog.Info("getting duration", "value", duration)
+	if stat, statErr := os.Stat(inputLocal); statErr == nil {
+		meta.Size = stat.Size()
+	}
+	slog.Info("probed source metadata",
+		"uuid", p.StreamUUID,
+		"duration", meta.Duration,
+		"size", meta.Size,
+		"recorded_at", meta.RecordedAtString(),
+		"location", meta.Location,
+		"camera", meta.Camera,
+	)
 
 	_, err = h.streamService.UpdateStreamMetadata(ctx, &pb.UpdateStreamMetadataRequest{
 		StreamUuid: p.StreamUUID.String(),
-		Duration:   int32(duration),
+		Duration:   int32(meta.Duration),
+		Size:       meta.Size,
 		Format:     "hls",
 		Resolution: "1280x720",
+		RecordedAt: meta.RecordedAtString(),
+		Location:   meta.Location,
+		Camera:     meta.Camera,
 	})
 	if err != nil {
 		slog.Error("update metadata failed", "error", err)

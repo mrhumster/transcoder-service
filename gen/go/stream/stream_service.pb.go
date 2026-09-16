@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.10
 // 	protoc        v3.21.12
-// source: stream/stream_service.proto
+// source: stream_service.proto
 
 package stream
 
@@ -63,11 +63,11 @@ func (x Status) String() string {
 }
 
 func (Status) Descriptor() protoreflect.EnumDescriptor {
-	return file_stream_stream_service_proto_enumTypes[0].Descriptor()
+	return file_stream_service_proto_enumTypes[0].Descriptor()
 }
 
 func (Status) Type() protoreflect.EnumType {
-	return &file_stream_stream_service_proto_enumTypes[0]
+	return &file_stream_service_proto_enumTypes[0]
 }
 
 func (x Status) Number() protoreflect.EnumNumber {
@@ -76,7 +76,7 @@ func (x Status) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Status.Descriptor instead.
 func (Status) EnumDescriptor() ([]byte, []int) {
-	return file_stream_stream_service_proto_rawDescGZIP(), []int{0}
+	return file_stream_service_proto_rawDescGZIP(), []int{0}
 }
 
 type UpdateStreamStatusRequest struct {
@@ -89,7 +89,7 @@ type UpdateStreamStatusRequest struct {
 
 func (x *UpdateStreamStatusRequest) Reset() {
 	*x = UpdateStreamStatusRequest{}
-	mi := &file_stream_stream_service_proto_msgTypes[0]
+	mi := &file_stream_service_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -101,7 +101,7 @@ func (x *UpdateStreamStatusRequest) String() string {
 func (*UpdateStreamStatusRequest) ProtoMessage() {}
 
 func (x *UpdateStreamStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_stream_stream_service_proto_msgTypes[0]
+	mi := &file_stream_service_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -114,7 +114,7 @@ func (x *UpdateStreamStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateStreamStatusRequest.ProtoReflect.Descriptor instead.
 func (*UpdateStreamStatusRequest) Descriptor() ([]byte, []int) {
-	return file_stream_stream_service_proto_rawDescGZIP(), []int{0}
+	return file_stream_service_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *UpdateStreamStatusRequest) GetStreamUuid() string {
@@ -140,7 +140,7 @@ type UpdateStreamStatusResponse struct {
 
 func (x *UpdateStreamStatusResponse) Reset() {
 	*x = UpdateStreamStatusResponse{}
-	mi := &file_stream_stream_service_proto_msgTypes[1]
+	mi := &file_stream_service_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -152,7 +152,7 @@ func (x *UpdateStreamStatusResponse) String() string {
 func (*UpdateStreamStatusResponse) ProtoMessage() {}
 
 func (x *UpdateStreamStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_stream_stream_service_proto_msgTypes[1]
+	mi := &file_stream_service_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -165,7 +165,7 @@ func (x *UpdateStreamStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateStreamStatusResponse.ProtoReflect.Descriptor instead.
 func (*UpdateStreamStatusResponse) Descriptor() ([]byte, []int) {
-	return file_stream_stream_service_proto_rawDescGZIP(), []int{1}
+	return file_stream_service_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *UpdateStreamStatusResponse) GetUpdated() bool {
@@ -182,13 +182,16 @@ type UpdateStreamMetadataRequest struct {
 	Size          int64                  `protobuf:"varint,3,opt,name=size,proto3" json:"size,omitempty"`
 	Format        string                 `protobuf:"bytes,4,opt,name=format,proto3" json:"format,omitempty"`
 	Resolution    string                 `protobuf:"bytes,5,opt,name=resolution,proto3" json:"resolution,omitempty"`
+	RecordedAt    string                 `protobuf:"bytes,6,opt,name=recorded_at,json=recordedAt,proto3" json:"recorded_at,omitempty"`
+	Location      string                 `protobuf:"bytes,7,opt,name=location,proto3" json:"location,omitempty"`
+	Camera        string                 `protobuf:"bytes,8,opt,name=camera,proto3" json:"camera,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *UpdateStreamMetadataRequest) Reset() {
 	*x = UpdateStreamMetadataRequest{}
-	mi := &file_stream_stream_service_proto_msgTypes[2]
+	mi := &file_stream_service_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -200,7 +203,7 @@ func (x *UpdateStreamMetadataRequest) String() string {
 func (*UpdateStreamMetadataRequest) ProtoMessage() {}
 
 func (x *UpdateStreamMetadataRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_stream_stream_service_proto_msgTypes[2]
+	mi := &file_stream_service_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -213,7 +216,7 @@ func (x *UpdateStreamMetadataRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateStreamMetadataRequest.ProtoReflect.Descriptor instead.
 func (*UpdateStreamMetadataRequest) Descriptor() ([]byte, []int) {
-	return file_stream_stream_service_proto_rawDescGZIP(), []int{2}
+	return file_stream_service_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *UpdateStreamMetadataRequest) GetStreamUuid() string {
@@ -251,6 +254,27 @@ func (x *UpdateStreamMetadataRequest) GetResolution() string {
 	return ""
 }
 
+func (x *UpdateStreamMetadataRequest) GetRecordedAt() string {
+	if x != nil {
+		return x.RecordedAt
+	}
+	return ""
+}
+
+func (x *UpdateStreamMetadataRequest) GetLocation() string {
+	if x != nil {
+		return x.Location
+	}
+	return ""
+}
+
+func (x *UpdateStreamMetadataRequest) GetCamera() string {
+	if x != nil {
+		return x.Camera
+	}
+	return ""
+}
+
 type UpdateStreamMetadataResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Updated       bool                   `protobuf:"varint,1,opt,name=updated,proto3" json:"updated,omitempty"`
@@ -260,7 +284,7 @@ type UpdateStreamMetadataResponse struct {
 
 func (x *UpdateStreamMetadataResponse) Reset() {
 	*x = UpdateStreamMetadataResponse{}
-	mi := &file_stream_stream_service_proto_msgTypes[3]
+	mi := &file_stream_service_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -272,7 +296,7 @@ func (x *UpdateStreamMetadataResponse) String() string {
 func (*UpdateStreamMetadataResponse) ProtoMessage() {}
 
 func (x *UpdateStreamMetadataResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_stream_stream_service_proto_msgTypes[3]
+	mi := &file_stream_service_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -285,7 +309,7 @@ func (x *UpdateStreamMetadataResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateStreamMetadataResponse.ProtoReflect.Descriptor instead.
 func (*UpdateStreamMetadataResponse) Descriptor() ([]byte, []int) {
-	return file_stream_stream_service_proto_rawDescGZIP(), []int{3}
+	return file_stream_service_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *UpdateStreamMetadataResponse) GetUpdated() bool {
@@ -308,7 +332,7 @@ type UpdateStreamProcessingRequest struct {
 
 func (x *UpdateStreamProcessingRequest) Reset() {
 	*x = UpdateStreamProcessingRequest{}
-	mi := &file_stream_stream_service_proto_msgTypes[4]
+	mi := &file_stream_service_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -320,7 +344,7 @@ func (x *UpdateStreamProcessingRequest) String() string {
 func (*UpdateStreamProcessingRequest) ProtoMessage() {}
 
 func (x *UpdateStreamProcessingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_stream_stream_service_proto_msgTypes[4]
+	mi := &file_stream_service_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -333,7 +357,7 @@ func (x *UpdateStreamProcessingRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateStreamProcessingRequest.ProtoReflect.Descriptor instead.
 func (*UpdateStreamProcessingRequest) Descriptor() ([]byte, []int) {
-	return file_stream_stream_service_proto_rawDescGZIP(), []int{4}
+	return file_stream_service_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *UpdateStreamProcessingRequest) GetStreamUuid() string {
@@ -380,7 +404,7 @@ type UpdateStreamProcessingResponse struct {
 
 func (x *UpdateStreamProcessingResponse) Reset() {
 	*x = UpdateStreamProcessingResponse{}
-	mi := &file_stream_stream_service_proto_msgTypes[5]
+	mi := &file_stream_service_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -392,7 +416,7 @@ func (x *UpdateStreamProcessingResponse) String() string {
 func (*UpdateStreamProcessingResponse) ProtoMessage() {}
 
 func (x *UpdateStreamProcessingResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_stream_stream_service_proto_msgTypes[5]
+	mi := &file_stream_service_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -405,7 +429,7 @@ func (x *UpdateStreamProcessingResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateStreamProcessingResponse.ProtoReflect.Descriptor instead.
 func (*UpdateStreamProcessingResponse) Descriptor() ([]byte, []int) {
-	return file_stream_stream_service_proto_rawDescGZIP(), []int{5}
+	return file_stream_service_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *UpdateStreamProcessingResponse) GetUpdated() bool {
@@ -415,17 +439,17 @@ func (x *UpdateStreamProcessingResponse) GetUpdated() bool {
 	return false
 }
 
-var File_stream_stream_service_proto protoreflect.FileDescriptor
+var File_stream_service_proto protoreflect.FileDescriptor
 
-const file_stream_stream_service_proto_rawDesc = "" +
+const file_stream_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1bstream/stream_service.proto\x12\x06stream\"d\n" +
+	"\x14stream_service.proto\x12\x06stream\"d\n" +
 	"\x19UpdateStreamStatusRequest\x12\x1f\n" +
 	"\vstream_uuid\x18\x01 \x01(\tR\n" +
 	"streamUuid\x12&\n" +
 	"\x06status\x18\x02 \x01(\x0e2\x0e.stream.StatusR\x06status\"6\n" +
 	"\x1aUpdateStreamStatusResponse\x12\x18\n" +
-	"\aupdated\x18\x01 \x01(\bR\aupdated\"\xa6\x01\n" +
+	"\aupdated\x18\x01 \x01(\bR\aupdated\"\xfb\x01\n" +
 	"\x1bUpdateStreamMetadataRequest\x12\x1f\n" +
 	"\vstream_uuid\x18\x01 \x01(\tR\n" +
 	"streamUuid\x12\x1a\n" +
@@ -434,7 +458,11 @@ const file_stream_stream_service_proto_rawDesc = "" +
 	"\x06format\x18\x04 \x01(\tR\x06format\x12\x1e\n" +
 	"\n" +
 	"resolution\x18\x05 \x01(\tR\n" +
-	"resolution\"8\n" +
+	"resolution\x12\x1f\n" +
+	"\vrecorded_at\x18\x06 \x01(\tR\n" +
+	"recordedAt\x12\x1a\n" +
+	"\blocation\x18\a \x01(\tR\blocation\x12\x16\n" +
+	"\x06camera\x18\b \x01(\tR\x06camera\"8\n" +
 	"\x1cUpdateStreamMetadataResponse\x12\x18\n" +
 	"\aupdated\x18\x01 \x01(\bR\aupdated\"\x9c\x01\n" +
 	"\x1dUpdateStreamProcessingRequest\x12\x1f\n" +
@@ -459,20 +487,20 @@ const file_stream_stream_service_proto_rawDesc = "" +
 	"\x16UpdateStreamProcessing\x12%.stream.UpdateStreamProcessingRequest\x1a&.stream.UpdateStreamProcessingResponseB7Z5github.com/mrhumster/transcoder-service/gen/go/streamb\x06proto3"
 
 var (
-	file_stream_stream_service_proto_rawDescOnce sync.Once
-	file_stream_stream_service_proto_rawDescData []byte
+	file_stream_service_proto_rawDescOnce sync.Once
+	file_stream_service_proto_rawDescData []byte
 )
 
-func file_stream_stream_service_proto_rawDescGZIP() []byte {
-	file_stream_stream_service_proto_rawDescOnce.Do(func() {
-		file_stream_stream_service_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_stream_stream_service_proto_rawDesc), len(file_stream_stream_service_proto_rawDesc)))
+func file_stream_service_proto_rawDescGZIP() []byte {
+	file_stream_service_proto_rawDescOnce.Do(func() {
+		file_stream_service_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_stream_service_proto_rawDesc), len(file_stream_service_proto_rawDesc)))
 	})
-	return file_stream_stream_service_proto_rawDescData
+	return file_stream_service_proto_rawDescData
 }
 
-var file_stream_stream_service_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_stream_stream_service_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
-var file_stream_stream_service_proto_goTypes = []any{
+var file_stream_service_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_stream_service_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_stream_service_proto_goTypes = []any{
 	(Status)(0),                            // 0: stream.Status
 	(*UpdateStreamStatusRequest)(nil),      // 1: stream.UpdateStreamStatusRequest
 	(*UpdateStreamStatusResponse)(nil),     // 2: stream.UpdateStreamStatusResponse
@@ -481,7 +509,7 @@ var file_stream_stream_service_proto_goTypes = []any{
 	(*UpdateStreamProcessingRequest)(nil),  // 5: stream.UpdateStreamProcessingRequest
 	(*UpdateStreamProcessingResponse)(nil), // 6: stream.UpdateStreamProcessingResponse
 }
-var file_stream_stream_service_proto_depIdxs = []int32{
+var file_stream_service_proto_depIdxs = []int32{
 	0, // 0: stream.UpdateStreamStatusRequest.status:type_name -> stream.Status
 	1, // 1: stream.StreamService.UpdateStreamStatus:input_type -> stream.UpdateStreamStatusRequest
 	3, // 2: stream.StreamService.UpdateStreamMetadata:input_type -> stream.UpdateStreamMetadataRequest
@@ -496,27 +524,27 @@ var file_stream_stream_service_proto_depIdxs = []int32{
 	0, // [0:1] is the sub-list for field type_name
 }
 
-func init() { file_stream_stream_service_proto_init() }
-func file_stream_stream_service_proto_init() {
-	if File_stream_stream_service_proto != nil {
+func init() { file_stream_service_proto_init() }
+func file_stream_service_proto_init() {
+	if File_stream_service_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_stream_stream_service_proto_rawDesc), len(file_stream_stream_service_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_stream_service_proto_rawDesc), len(file_stream_service_proto_rawDesc)),
 			NumEnums:      1,
 			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_stream_stream_service_proto_goTypes,
-		DependencyIndexes: file_stream_stream_service_proto_depIdxs,
-		EnumInfos:         file_stream_stream_service_proto_enumTypes,
-		MessageInfos:      file_stream_stream_service_proto_msgTypes,
+		GoTypes:           file_stream_service_proto_goTypes,
+		DependencyIndexes: file_stream_service_proto_depIdxs,
+		EnumInfos:         file_stream_service_proto_enumTypes,
+		MessageInfos:      file_stream_service_proto_msgTypes,
 	}.Build()
-	File_stream_stream_service_proto = out.File
-	file_stream_stream_service_proto_goTypes = nil
-	file_stream_stream_service_proto_depIdxs = nil
+	File_stream_service_proto = out.File
+	file_stream_service_proto_goTypes = nil
+	file_stream_service_proto_depIdxs = nil
 }
