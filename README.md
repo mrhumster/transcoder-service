@@ -61,6 +61,31 @@ Built for **AMD RX 5700 XT** (RDNA) — no NVENC/CUDA needed on that card. The i
 so libva finds the radeonsi driver; `h264_vaapi` ships in the Alpine 3.18 ffmpeg package
 (no source build). macOS/WSL dev hosts without `/dev/dri` just run `cpu`.
 
+## Video metadata extraction (ffprobe)
+
+Before transcoding, the worker probes the **original** file and sends the result in the gRPC
+`UpdateStreamMetadata` call (new fields recorded_at/location/camera, plus size):
+
+`internal/processor/metadata.go` — `ProbeMetadata` runs
+`ffprobe -v error -print_format json -show_format -show_streams` and `metadataFromProbe`
+maps the JSON onto `VideoMetadata{RecordedAt, Location, Camera, Duration, Size}`:
+
+| Field | Source | Notes |
+|---|---|---|
+| `recorded_at` | `creation_time` / `com.apple.quicktime.creationdate` | `parseRecordedAt` handles RFC3339Nano, `UTC`/`UTC9` MSF, RFC1123, `YYYYMMDD HHMMSS` |
+| `location` | `com.apple.quicktime.location.ISO6709` | ISO 6709 → `"lat,lng"` (decimal and DDDMMSS forms); human-readable `location` tags as fallback |
+| `camera` | `make` + `model` | merged into `"Make Model"` |
+| `size` | `os.Stat(inputLocal)` | **fix** — size is reported from the actual file, no longer zeroed out after transcode |
+
+**Tag placement:** format-level tags (`-show_format`) are preferred, with a fallback to the
+first media stream's tags. This covers both QuickTime containers that write into the `udta`
+metadata atom (format level) and files that only carry them in an `mdta` stream atom
+(muxed with `-movflags use_metadata_tags` — the tag keys surface under the stream). A common
+`mergeTags`/`firstNonEmpty` helper keeps the lookup order consistent. Note that ffmpeg 6.1.1
+itself only writes `creation_time` on a plain remux — the QuickTime `location`/`make`/`model`
+tags end up on the stream level, which is why the fallback path matters for real camera files
+(iPhone/GoPro and similar store them in the container).
+
 ## Deployment
 
 K8s manifests under `deploy/k8s/`:
