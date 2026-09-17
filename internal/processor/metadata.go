@@ -131,7 +131,12 @@ func metadataFromProbe(ff *ffprobeOutput) VideoMetadata {
 			tags[formatTagLocationPlain],
 			streamTags[formatTagLocationPlain],
 		); loc != "" {
-			m.Location = strings.TrimSpace(loc)
+			loc = strings.TrimSpace(loc)
+			if lat, lng, ok := parseISO6709(loc); ok {
+				m.Location = fmt.Sprintf("%.5f,%.5f", lat, lng)
+			} else {
+				m.Location = loc
+			}
 		}
 	}
 

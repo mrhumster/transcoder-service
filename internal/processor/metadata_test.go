@@ -82,6 +82,35 @@ func TestMetadataFromProbe_StreamTagFallback(t *testing.T) {
 	}
 }
 
+func TestMetadataFromProbe_PlainLocationISO6709(t *testing.T) {
+	ff := &ffprobeOutput{
+		Format: ffprobeFormat{
+			Tags: map[string]string{
+				formatTagLocation: "+55.0090+073.2981/",
+			},
+		},
+	}
+
+	m := metadataFromProbe(ff)
+
+	if m.Location != "55.00900,73.29810" {
+		t.Errorf("location = %q", m.Location)
+	}
+}
+
+func TestMetadataFromProbe_StreamPlainLocationISO6709(t *testing.T) {
+	ff := &ffprobeOutput{
+		Format:  ffprobeFormat{Tags: map[string]string{}},
+		Streams: []ffprobeStream{{Tags: map[string]string{formatTagLocationPlain: "+40.7128-074.0060/"}}},
+	}
+
+	m := metadataFromProbe(ff)
+
+	if m.Location != "40.71280,-74.00600" {
+		t.Errorf("location = %q", m.Location)
+	}
+}
+
 func TestMetadataFromProbe_HumanLocation(t *testing.T) {
 	ff := &ffprobeOutput{
 		Format: ffprobeFormat{
