@@ -1,7 +1,17 @@
 # transcoder-service
 
-Transcodes uploaded videos into HLS for GoCast. An **asynq** worker scaled by **KEDA** —
-it sleeps at 0 replicas and wakes up when a transcoding task lands in the queue.
+Transcodes uploaded videos into HLS for GoCast, and muxes an already transcoded rendition into a
+single MP4 on demand. The image ships **two binaries**, each an **asynq** worker scaled by **KEDA**
+— they sleep at 0 replicas and wake up when a task lands in their queue:
+
+| Binary | Queue (Redis DB) | Task | Purpose |
+|---|---|---|---|
+| `/app/transcoder-worker` | `default` (2) | `video:transcode` | encode an HLS rendition, report progress/metadata |
+| `/app/transcoder-exporter` | `default` (4) | `video:export` | remux an HLS rendition into one MP4 |
+
+The transcode worker is the default (`CMD`); the exporter has its own Deployment and ConfigMap.
+The sections below describe the transcode worker unless they say otherwise — the exporter is
+covered in "Export worker (`cmd/exporter`)".
 
 ## How it works
 
@@ -29,9 +39,11 @@ The server is started with `sharedworker.Options` and **no `Queues` option**, so
 queue set is used — the worker consumes everything that lands in `default`, with no per-task-type
 filtering of its own.
 
-Only the transcode handler is wrapped in `sharedmetrics.Instrument`
-(`mux.HandleFunc(queue.TaskVideoTranscoding, …)`), so `asynq_task_*` reflects `video:transcode`
-work alone. No other shared task types are registered or instrumented here.
+The transcode handler is wrapped in `sharedmetrics.Instrument`
+(`mux.HandleFunc(queue.TaskVideoTranscoding, …)`), so the `asynq_task_*` series this binary
+exposes reflect `video:transcode` work alone — no other task type is registered in **this**
+binary. The exporter is the exception elsewhere in the repo, not here: it registers its own
+`video:export` handler the same way (`cmd/exporter/main.go:117`), against a different Redis DB.
 
 ### Handler flow (`internal/queue/handler.go`)
 
@@ -110,6 +122,12 @@ Exposed on `METRICS_ADDR` (empty string disables the server) via `promhttp`:
 | `transcoder_aborted_total` | counter | Context cancellation only |
 | `transcoder_duration_seconds` | histogram | Wall time, observed only for tasks that returned `nil` |
 
+The names above are the only ones this service ever exports. In particular
+`transcoder_processing_duration_seconds` and `transcoder_processing_errors_total` **do not exist**
+— a Grafana query for either returns an empty vector, which PromQL drops from a `sum()` without
+raising anything, so the panel keeps rendering and silently reports too few errors. That is not
+hypothetical: those two names sat in the workers dashboard until it was fixed.
+
 Plus the shared asynq metrics from `go-shared/metrics` (`asynq_task_processed_total`,
 `asynq_task_duration_seconds`, `asynq_task_inflight`) and Go runtime metrics. Those vectors are
 created lazily, so the `asynq_task_*` series appear only after the first task runs — and because
@@ -119,6 +137,15 @@ The Deployment carries `prometheus.io/scrape|port|path` annotations and the live
 HTTP GET on `/metrics` (not `ps`), so a running metrics server doubles as the health signal.
 Because the transcoder counters are registered in `init()` they appear as `0` immediately; the
 histogram series exist as soon as the server starts.
+
+**The exporter publishes the same counters.** `internal/queue/export_handler.go` increments
+`transcoder_errors_total`, `transcoder_processed_total`, `transcoder_disk_full_total` and
+`transcoder_duration_seconds` — the very same unlabelled series, from the same
+`internal/metrics` package — and its Deployment also serves `:9090` with the scrape annotations
+set. Since none of these counters carry a label identifying the kind of work, the two worker
+kinds are indistinguishable in a scrape and in every `sum()` over the namespace. The counters'
+`Help` strings say "transcoding", which is now only half true. See Known issues for the
+dashboard-level consequence.
 
 ## Configuration
 
@@ -142,7 +169,7 @@ See `services/shared/README.md` for the loader.
 | `METRICS_ADDR` | `""` | `:9090` in the generated ConfigMap |
 | `WORKER_CONCURRENCY` | `1` | |
 | `WORKER_SHUTDOWN_TIMEOUT` | `50m` | |
-| `WORKER_RETRY_DELAY` | `30s` | parsed by the config loader but **not** wired into the asynq server — the asynq default backoff applies |
+| `WORKER_RETRY_DELAY` | `30s` | parsed by the config loader but **not** wired into the asynq server — the asynq default backoff applies. `sharedworker.Options` does have a `RetryDelay` field and `NewAsynqServer` honours it via `RetryDelayFunc` (`services/shared/worker/worker.go:68`), but neither `cmd/worker/main.go` nor `cmd/exporter/main.go` sets it, and the generated transcoder ConfigMaps do not even define the variable. `faces-worker` does pass it, so the value is not dead everywhere in the cluster — just here. |
 | `TRANSCODER_ENCODER` | `auto` | `auto` \| `cpu` \| `vaapi` |
 | `MAILER_REDIS_DB` | `2` | **export worker only**: DB of the mailer queue |
 | `SMTP_ADDR` / `SMTP_USER` / `SMTP_FROM` / `FRONTEND_URL` | — | **export worker only**; export mails are disabled when `SMTP_ADDR` or `FRONTEND_URL` is empty |
@@ -209,16 +236,19 @@ when the source had no creation time (stream-service tolerates and ignores empty
 ```
 transcoder-service/
 ├── cmd/worker/main.go            # asynq server wiring, gRPC/mTLS client, metrics server
+├── cmd/exporter/main.go          # second binary: export queue (DB 4), failure reporter, mail
 ├── internal/
-│   ├── metrics/metrics.go        # business counters + histogram
+│   ├── metrics/metrics.go        # business counters + histogram (shared by both binaries)
 │   ├── processor/ffmpeg.go       # encoder resolution, buildArgs, TranscodeToHLS
+│   ├── processor/mux.go          # MuxToMP4 (stream copy, faststart) for the exporter
 │   ├── processor/metadata.go     # ffprobe → VideoMetadata
 │   ├── processor/processor.go    # VideoProcessor interfaces
 │   ├── processor/mock/           # gomock VideoProcessor
-│   ├── queue/payload.go          # task type + payload
+│   ├── queue/payload.go          # task types + payloads (transcode, export)
 │   ├── queue/handler.go          # disk check, download, progress, upload, gRPC updates
+│   ├── queue/export_handler.go   # DownloadDir → MuxToMP4 → CompleteStreamExport → mail
 │   ├── service/mock/             # gomock StreamServiceClient
-│   ├── storage/                  # MinIO FileStorage (Download / UploadDir)
+│   ├── storage/                  # MinIO FileStorage (Download / DownloadDir / UploadDir)
 │   └── storage/mock/             # gomock FileStorage, MinioClient
 ├── gen/go/stream/                # generated gRPC code (from ../proto)
 ├── proto/stream/                 # copy of the shared stream_service.proto
@@ -252,8 +282,8 @@ a no-op; use `kubectl rollout restart deployment/transcoder-service -n go-app` i
 deploy/k8s/
 ├── keda/
 │   ├── auth.yaml                     # Redis trigger auth (secret casbin-redis, key redis-password)
-│   ├── scaledobject.yaml             # transcode worker: scale 0..1 on default-queue length (DB 2)
-│   └── exporter-scaledobject.yaml    # export worker: same, on DB 4
+│   ├── scaledobject.yaml             # transcode worker: DB 2, listLength 2, scale 0..1
+│   └── exporter-scaledobject.yaml    # export worker: DB 4, listLength 1, scale 0..1
 └── transcoder/
     ├── deployment.yaml               # transcode worker, image xomrkob/transcoder-service:<tag>, metrics :9090
     ├── exporter-deployment.yaml      # export worker, same image, command /app/transcoder-exporter
@@ -262,10 +292,14 @@ deploy/k8s/
 
 KEDA polls Redis DB 2 lists `asynq:{default}:pending` and `asynq:{default}:active`
 (the latter declared as a zset) and scales when either exceeds `listLength: 2`;
-`minReplicaCount: 0`, `maxReplicaCount: 1`, `cooldownPeriod: 120`. Both manifests live in git but
-`make keda-deploy` only installs the KEDA chart — the `ScaledObject` and the `keda-redis-auth`
-`TriggerAuthentication` have to be applied by hand. Note that the transcoder shares the `default`
-queue with other asynq producers, so a busy default queue will also wake this worker.
+`minReplicaCount: 0`, `maxReplicaCount: 1`, `cooldownPeriod: 120`. The exporter is deliberately
+*not* identical: it watches the same two list names but on **DB 4** with `listLength: 1` — one
+queued export is already a multi-minute remux, so there is no reason to wait for a second task
+before scaling up, while the transcode worker's threshold trades cold-start latency against
+spurious scale-ups. Both manifests live in git but `make keda-deploy` only installs the KEDA chart
+— the `ScaledObject` and the `keda-redis-auth` `TriggerAuthentication` have to be applied by hand.
+Note that the transcoder shares the `default` queue with other asynq producers, so a busy default
+queue will also wake this worker.
 
 The Deployment is GPU-ready out of the box:
 
@@ -281,6 +315,20 @@ The Deployment is GPU-ready out of the box:
 - resources: requests `250m` CPU / `512Mi`, limits `2000m` / `1Gi` (tuned for a 4-core node);
 - `nodeSelector`/`tolerations` for a `gpu=true` node are present but **commented out** — enable
   them once a GPU-capable k3s agent (`--node-label gpu=true`) joins.
+
+**The 5-minute cap is worse for the exporter than for the transcode worker.** Both Deployments
+set `terminationGracePeriodSeconds: 300` + `preStop: sleep 5`, but an export task is enqueued with
+`asynq.Timeout(30 * time.Minute)` (`exportTaskTimeout` in stream-service
+`internal/queue/payload.go:19`) — six times the pod's grace period. A rollout, eviction or node
+reboot during a long export therefore SIGKILLs the pod while asynq still considers the task active
+for the rest of that 30-minute window, so the `stream_exports` row sits in `pending` with nothing
+apparently running, and only the lease expiry plus `MaxRetry(1)` decides the outcome. The mismatch
+is much more likely to be hit here than in transcoding: the export path is I/O-bound, re-reading a
+multi-gigabyte HLS rendition and writing a remuxed copy of it, with no speedup from VAAPI.
+
+The exporter Deployment also carries `securityContext.runAsUser: 0` even though it mounts no
+`/dev/dri` and never touches the GPU — the override buys it nothing here (unlike the transcode
+worker, which needs root for the render node) and gives up the image's non-root `appuser`.
 
 The asynq worker scaffolding (`worker.NewAsynqServer`, ErrorHandler wiring) is shared with
 thumbnail — see `services/shared/worker`.
@@ -309,6 +357,27 @@ Flow (`internal/queue/export_handler.go`): `DownloadDir(processed/<id>/)` → `M
 queue (DB 2). The stream-service callback flips the row to `ready` and broadcasts
 `STREAM_EXPORT_READY`, so **stream-service owns the state** and the worker owns nothing.
 
+**How the task is enqueued** (stream-service `internal/queue/export_task_distributor.go`):
+
+| Option | Value | Why |
+|---|---|---|
+| `asynq.TaskID` | `export-<streamUUID>-<unixNano>` | unique **per enqueue**, not per stream — see below |
+| `asynq.MaxRetry` | `1` | the mux is idempotent, but re-running it after a failure costs a full re-download of the rendition |
+| `asynq.Timeout` | `30 * time.Minute` | a long single-file rendition of a long video; note this exceeds the pod's 300s termination grace, see Deployment |
+
+The timestamped `TaskID` is a deliberate retreat from a stable per-stream ID. asynq retains
+completed task IDs, so a stable `export-<streamUUID>` made a *later* export of the same stream
+fail with "task ID conflicts with another task" long after the first one had settled — which is
+also why a retried `POST /stream/:id/export` used to break with that error. Uniqueness per
+enqueue trades a different property away: **the `TaskID` does not deduplicate double clicks.** One
+export at a time per stream is enforced by the `stream_exports` row instead, whose state is reset
+conditionally so two retries cannot both queue a mux. The distributor still tolerates
+`asynq.ErrDuplicateTask` by logging and returning success, but on a per-enqueue ID that branch is
+effectively unreachable.
+
+Retry semantics are otherwise the same as the transcode worker — the handler is not resumable, so
+the single retry re-downloads the HLS directory and remuxes from scratch.
+
 Two deliberate choices:
 
 - The file is remuxed, never re-encoded (`-c copy -bsf:a aac_adtstoasc -movflags +faststart`),
@@ -326,9 +395,14 @@ it is the only one that sends mail. `MAILER_REDIS_DB` points at the mailer's DB.
 
 ## Known issues
 
-- **Wrong metric names in older docs.** The authoritative names are `transcoder_duration_seconds`
-  and `transcoder_errors_total`; `transcoder_processing_duration_seconds` /
-  `transcoder_processing_errors_total` do not exist and will never appear in a scrape.
+- **Exports are counted as transcodes.** The exporter increments the unlabelled
+  `transcoder_processed_total` / `transcoder_errors_total` / `transcoder_duration_seconds`, and
+  both Deployments are scraped on `:9090`, so nothing in a scrape distinguishes an MP4 mux from a
+  transcode. The Grafana panels "Transcodes processed total" and "Worker rates" (legend
+  `transcodes/s`) are `sum(transcoder_processed_total{namespace="$namespace"})` with no pod
+  filter, so every export inflates the transcode rate and the average duration. Fixing this needs
+  a `kind=transcode|export` label (or separate metric names) in `internal/metrics` plus a
+  dashboard update — deliberately not done here, it is a code change, not a docs one.
 - **A generic download failure is reported as success.** `internal/queue/handler.go` returns `nil`
   for any `storage.Download` error that is neither `does not exist` nor
   `no space left on device`, so the task is marked successful (counted in
