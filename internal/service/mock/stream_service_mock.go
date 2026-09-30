@@ -42,6 +42,26 @@ func (m *MockStreamServiceClient) EXPECT() *MockStreamServiceClientMockRecorder 
 	return m.recorder
 }
 
+// CompleteStreamExport mocks base method.
+func (m *MockStreamServiceClient) CompleteStreamExport(ctx context.Context, in *stream.CompleteStreamExportRequest, opts ...grpc.CallOption) (*stream.CompleteStreamExportResponse, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, in}
+	for _, a := range opts {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "CompleteStreamExport", varargs...)
+	ret0, _ := ret[0].(*stream.CompleteStreamExportResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CompleteStreamExport indicates an expected call of CompleteStreamExport.
+func (mr *MockStreamServiceClientMockRecorder) CompleteStreamExport(ctx, in any, opts ...any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, in}, opts...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CompleteStreamExport", reflect.TypeOf((*MockStreamServiceClient)(nil).CompleteStreamExport), varargs...)
+}
+
 // UpdateStreamMetadata mocks base method.
 func (m *MockStreamServiceClient) UpdateStreamMetadata(ctx context.Context, in *stream.UpdateStreamMetadataRequest, opts ...grpc.CallOption) (*stream.UpdateStreamMetadataResponse, error) {
 	m.ctrl.T.Helper()
@@ -124,6 +144,21 @@ func NewMockStreamServiceServer(ctrl *gomock.Controller) *MockStreamServiceServe
 // EXPECT returns an object that allows the caller to indicate expected use.
 func (m *MockStreamServiceServer) EXPECT() *MockStreamServiceServerMockRecorder {
 	return m.recorder
+}
+
+// CompleteStreamExport mocks base method.
+func (m *MockStreamServiceServer) CompleteStreamExport(arg0 context.Context, arg1 *stream.CompleteStreamExportRequest) (*stream.CompleteStreamExportResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CompleteStreamExport", arg0, arg1)
+	ret0, _ := ret[0].(*stream.CompleteStreamExportResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CompleteStreamExport indicates an expected call of CompleteStreamExport.
+func (mr *MockStreamServiceServerMockRecorder) CompleteStreamExport(arg0, arg1 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CompleteStreamExport", reflect.TypeOf((*MockStreamServiceServer)(nil).CompleteStreamExport), arg0, arg1)
 }
 
 // UpdateStreamMetadata mocks base method.

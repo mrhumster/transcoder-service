@@ -1,0 +1,453 @@
+# transcoder-service
+
+Transcodes uploaded videos into HLS for GoCast, and muxes an already transcoded rendition into a
+single MP4 on demand. The image ships **two binaries**, each an **asynq** worker scaled by **KEDA**
+— they sleep at 0 replicas and wake up when a task lands in their queue:
+
+| Binary | Queue (Redis DB) | Task | Purpose |
+|---|---|---|---|
+| `/app/transcoder-worker` | `default` (2) | `video:transcode` | encode an HLS rendition, report progress/metadata |
+| `/app/transcoder-exporter` | `default` (4) | `video:export` | remux an HLS rendition into one MP4 |
+
+The transcode worker is the default (`CMD`); the exporter has its own Deployment and ConfigMap.
+The sections below describe the transcode worker unless they say otherwise — the exporter is
+covered in "Export worker (`cmd/exporter`)".
+
+## How it works
+
+- stream-service enqueues a `video:transcode` task onto the asynq `default` queue
+  (Redis DB 2);
+- KEDA `ScaledObject` watches `asynq:{default}:pending` / `asynq:{default}:active` and scales
+  the deployment from 0 to 1;
+- the handler (`internal/queue/handler.go`) downloads the source from MinIO into `/tmp`,
+  probes it with ffprobe, runs ffmpeg (`internal/processor`) into a local HLS directory,
+  then uploads `index.m3u8` + segments back under `processed/<streamUUID>/`;
+- progress is reported to stream-service over gRPC `UpdateStreamProcessing` (0 → 100, throttled by
+  5 points, and a final `100` is always sent — even when ffmpeg fails), the extracted metadata via
+  `UpdateStreamMetadata`, and the final state via `UpdateStreamStatus`;
+- KEDA scales back to 0 when the queue drains (normal).
+
+### Task contract
+
+| Field | Value |
+|---|---|
+| Task type | `video:transcode` (`queue.TaskVideoTranscoding`) |
+| Payload | `{"stream_uuid": "<uuid>", "input_path": "<minio key>"}` |
+| Handler | `HandleVideoTranscoderTask` (method) on `*HandleVideoTrancoder` (misspelled type), built by `NewHandleVideoTranscoder` |
+
+The server is started with `sharedworker.Options` and **no `Queues` option**, so asynq's default
+queue set is used — the worker consumes everything that lands in `default`, with no per-task-type
+filtering of its own.
+
+The transcode handler is wrapped in `sharedmetrics.Instrument`
+(`mux.HandleFunc(queue.TaskVideoTranscoding, …)`), so the `asynq_task_*` series this binary
+exposes reflect `video:transcode` work alone — no other task type is registered in **this**
+binary. The exporter is the exception elsewhere in the repo, not here: it registers its own
+`video:export` handler the same way (`cmd/exporter/main.go:117`), against a different Redis DB.
+
+### Handler flow (`internal/queue/handler.go`)
+
+1. `os.Mkdir` `/tmp/<stream-uuid>` and `/tmp/<stream-uuid>/hls`; a deferred `os.RemoveAll` removes the
+   work dir whatever happens;
+2. `storage.Download` the source to `input.mp4`. A missing object and a download-time
+   `no space left on device` return `asynq.SkipRetry` (the latter bumps `transcoder_disk_full_total`);
+   **any other download error returns `nil`** (see Known issues);
+3. `ProbeMetadata` the local copy (failure is logged, not fatal) and `UpdateStreamMetadata`
+   (recorded_at / location / camera / size / duration) — **before** transcoding, with
+   `Format: "hls"` and `Resolution: "1280x720"` hardcoded (the actual output resolution is never
+   probed); a failure here is returned and retried;
+4. `TranscodeToHLS` with throttled `UpdateStreamProcessing` progress parsed from ffmpeg's
+   `-progress pipe:1`; every progress tick also runs the `/tmp` guard (below);
+5. `storage.UploadDir` the HLS output to `processed/<stream-uuid>`;
+6. `UpdateStreamStatus` to `ready`, final `UpdateStreamProcessing` 100%.
+
+Cancellation via context marks the task aborted (`transcoder_aborted_total`).
+
+**Progress reporting.** `lastSentPercent` starts at `-1` and updates are sent when the reported
+percent reaches `lastSentPercent + 5` (or 100), so there is **no guaranteed initial `0%`** — a
+very short source can jump straight to 100. Two consequences worth knowing:
+
+- `TranscodeToHLS` emits `Progress{Percent: 100, Finished: true}` *before* `cmd.Wait()`, so a
+  failing encode can still have reported 100% just before the error;
+- an error update reuses `lastSentPercent`, so the failure can surface as `-1` (if no progress
+  event ever arrived) or as `100` (if the forced completion event already landed).
+
+`steps` only ever contains `"Transcoding"` (progress / ffmpeg error / disk guard),
+`"Uploading to the storage"` (sent *before* the upload walk, at 100%) or an empty list (the final
+100% after `ready`). The single `"Processing"` step comes from a different place — the asynq
+`ErrorReporter` in `cmd/worker/main.go`, which reports `Progress: 0` with
+`"Worker died or resourse limit exceeded"` when the task is finally abandoned.
+
+**`/tmp` guard.** On every progress event the handler measures the *cumulative* size of `/tmp`
+(`getDirSize("/tmp")`, i.e. total bytes in use, not free space) and, above
+`9 * 1024 * 1024 * 1024`, sends an error update (`Progress: 0`, `steps: ["Transcoding"]`),
+increments `transcoder_disk_full_total` and returns `asynq.SkipRetry`. Two caveats: `getDirSize`
+returns `0` on traversal errors, and the measurement covers everything else sharing `/tmp` in the
+pod, so the guard can trip for reasons unrelated to the current transcode.
+
+### ffmpeg invocation
+
+`internal/processor/ffmpeg.go` builds the argument list:
+
+| Setting | Value |
+|---|---|
+| Video bitrate | `-b:v 2500k -maxrate 2500k -bufsize 5000k` |
+| Audio | `-c:a aac` |
+| HLS segment | `-hls_time 10 -hls_list_size 0` (one playlist, no rolling window) |
+| Segment name | `seg_%d.ts` |
+| CPU encoder | `-threads 0 -c:v libx264` |
+| VAAPI encoder | `-vaapi_device /dev/dri/renderD128` (before `-i`), `-vf format=nv12,hwupload`, `-c:v h264_vaapi` (no `-threads`) |
+
+## Spec
+
+| Layer | Tech |
+|---|---|
+| Task queue | Asynq (Redis), `default` queue, DB 2 |
+| Processing | ffmpeg / ffprobe (`internal/processor`) |
+| Storage | MinIO (`internal/storage`) |
+| gRPC | Client to stream-service (**mTLS**, serverName `stream-service`) |
+| Metrics | Prometheus `/metrics` on `METRICS_ADDR` (`:9090` in K8s, empty = off) |
+| Config | `sharedconfig` from `go-shared` (env-driven) |
+| Module | `github.com/mrhumster/transcoder-service`, Go 1.25.14 |
+
+## Metrics
+
+Exposed on `METRICS_ADDR` (empty string disables the server) via `promhttp`:
+
+| Metric | Type | Meaning |
+|---|---|---|
+| `transcoder_processed_total` | counter | Tasks that returned `nil` — **including** the generic download-error path that returns `nil` by mistake |
+| `transcoder_errors_total` | counter | Tasks that returned a non-nil error |
+| `transcoder_disk_full_total` | counter | Download-time `no space left on device` errors **and** cumulative-`/tmp` guard trips; ffmpeg-reported disk-full errors are *not* counted |
+| `transcoder_aborted_total` | counter | Context cancellation only |
+| `transcoder_duration_seconds` | histogram | Wall time, observed only for tasks that returned `nil` |
+
+The names above are the only ones this service ever exports. In particular
+`transcoder_processing_duration_seconds` and `transcoder_processing_errors_total` **do not exist**
+— a Grafana query for either returns an empty vector, which PromQL drops from a `sum()` without
+raising anything, so the panel keeps rendering and silently reports too few errors. That is not
+hypothetical: those two names sat in the workers dashboard until it was fixed.
+
+Plus the shared asynq metrics from `go-shared/metrics` (`asynq_task_processed_total`,
+`asynq_task_duration_seconds`, `asynq_task_inflight`) and Go runtime metrics. Those vectors are
+created lazily, so the `asynq_task_*` series appear only after the first task runs — and because
+the buggy download path returns `nil`, it is also labelled `success` there.
+
+The Deployment carries `prometheus.io/scrape|port|path` annotations and the liveness probe is an
+HTTP GET on `/metrics` (not `ps`), so a running metrics server doubles as the health signal.
+Because the transcoder counters are registered in `init()` they appear as `0` immediately; the
+histogram series exist as soon as the server starts.
+
+**The exporter publishes the same counters.** `internal/queue/export_handler.go` increments
+`transcoder_errors_total`, `transcoder_processed_total`, `transcoder_disk_full_total` and
+`transcoder_duration_seconds` — the very same unlabelled series, from the same
+`internal/metrics` package — and its Deployment also serves `:9090` with the scrape annotations
+set. Since none of these counters carry a label identifying the kind of work, the two worker
+kinds are indistinguishable in a scrape and in every `sum()` over the namespace. The counters'
+`Help` strings say "transcoding", which is now only half true. See Known issues for the
+dashboard-level consequence.
+
+## Configuration
+
+Loaded by `sharedconfig.LoadConfig()`. In Kubernetes the values come from
+`transcoder-service-config` (generated by `scripts/render-env.sh` from the root `.env`),
+`go-app-config`, the `casbin-redis` and `minio-credentials` secrets, plus inline `GRPC_TLS_*`.
+See `services/shared/README.md` for the loader.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `REDIS_ADDR` | `localhost` | asynq/Redis host |
+| `REDIS_DB` | `2` | queue database |
+| `redis-password` | — | Redis password; the env var name is literally the secret key name |
+| `MINIO_ENDPOINT` | `localhost:9000` | |
+| `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | `admin` / `minio123` | dev defaults only |
+| `MINIO_BUCKET_NAME` | `stream-service-test` | |
+| `MINIO_USE_SSL` / `MINIO_REGION` | `false` / `ru-east-1` | |
+| `STREAM_SERVICE_ADDR` | `localhost:50051` | gRPC target for progress reporting |
+| `GRPC_TLS_ENABLED` | `false` | set to `true` in K8s |
+| `GRPC_TLS_CERT` / `GRPC_TLS_KEY` / `GRPC_TLS_CA` | — | mounted from secret `grpc-transcoder-tls` at `/tls/grpc` |
+| `METRICS_ADDR` | `""` | `:9090` in the generated ConfigMap |
+| `WORKER_CONCURRENCY` | `1` | |
+| `WORKER_SHUTDOWN_TIMEOUT` | `50m` | |
+| `WORKER_RETRY_DELAY` | `30s` | parsed by the config loader but **not** wired into the asynq server — the asynq default backoff applies. `sharedworker.Options` does have a `RetryDelay` field and `NewAsynqServer` honours it via `RetryDelayFunc` (`services/shared/worker/worker.go:68`), but neither `cmd/worker/main.go` nor `cmd/exporter/main.go` sets it, and the generated transcoder ConfigMaps do not even define the variable. `faces-worker` does pass it, so the value is not dead everywhere in the cluster — just here. |
+| `TRANSCODER_ENCODER` | `auto` | `auto` \| `cpu` \| `vaapi` |
+| `MAILER_REDIS_DB` | `2` | **export worker only**: DB of the mailer queue |
+| `SMTP_ADDR` / `SMTP_USER` / `SMTP_FROM` / `FRONTEND_URL` | — | **export worker only**; export mails are disabled when `SMTP_ADDR` or `FRONTEND_URL` is empty |
+
+## gRPC / mTLS
+
+The worker only **calls** stream-service (no server). `cmd/worker/main.go` builds the client with
+`grpctls.ClientTLSCreds(cert, key, ca, "stream-service")` when `GRPC_TLS_ENABLED=true`; the peer
+certificate must be issued for `stream-service` by the same local CA as the other services.
+The client cert must carry the `transcoder-service` OU — stream-service's `AllowOUsInterceptor`
+accepts `transcoder-service` and `thumbnail-service`.
+
+## GPU encoding (VAAPI)
+
+`TRANSCODER_ENCODER` selects the encoder at startup in `NewFFmpegProcessor`:
+
+| Value | Effective encoder | Behaviour |
+|---|---|---|
+| `auto` (default) | `h264_vaapi` if available, else `libx264` | probes `/dev/dri/renderD128` and `ffmpeg -encoders` |
+| `cpu` | `libx264` | always software |
+| `vaapi` | `h264_vaapi` if available, else `libx264` | forced, but **degrades to CPU instead of failing** |
+| anything else | `libx264` | unknown value warns and falls back |
+
+Capability detection is `os.Stat("/dev/dri/renderD128")` plus a grep of `h264_vaapi` in
+`ffmpeg -encoders`. Failures during resolution are logged as warnings only — the worker always
+starts with a usable encoder, so a misconfigured `TRANSCODER_ENCODER` silently produces
+software-encoded output rather than an error.
+
+Built for **AMD RX 5700 XT** (RDNA/Navi 10) — no NVENC/CUDA needed. The runtime image installs
+`libva` + `mesa-dri-gallium` and symlinks
+`/usr/lib/dri/radeonsi_dri.so → ../xorg/modules/dri/radeonsi_dri.so` because Alpine ships DRI
+drivers under the xorg modules directory. `h264_vaapi` is part of the Alpine 3.18 ffmpeg package,
+so no source build is required. macOS/WSL dev hosts without `/dev/dri` just run `cpu`.
+
+## Video metadata extraction (ffprobe)
+
+Before transcoding, the worker probes the **original** file and sends the result in the gRPC
+`UpdateStreamMetadata` call.
+
+`internal/processor/metadata.go` — `ProbeMetadata` runs
+`ffprobe -v error -print_format json -show_format -show_streams` and `metadataFromProbe`
+maps the JSON onto `VideoMetadata{RecordedAt, Location, Camera, Duration, Size}`:
+
+| Field | Source | Notes |
+|---|---|---|
+| `recorded_at` | `creation_time` / `com.apple.quicktime.creationdate` | `parseRecordedAt` handles RFC3339Nano, `UTC`/`UTC9` MSF, RFC1123, `YYYYMMDD HHMMSS` |
+| `location` | `com.apple.quicktime.location.ISO6709` | ISO 6709 → `"lat,lng"` (decimal and DDDMMSS forms); plain `location` tags are parsed too and only stored raw if they are not ISO 6709 |
+| `camera` | `make` + `model` | merged into `"Make Model"` |
+| `size` | `os.Stat(inputLocal)` | real file size, no longer zeroed after transcode |
+
+**Tag placement:** format-level tags (`-show_format`) are preferred, with a fallback to the first
+media stream's tags. This covers QuickTime containers that write into the `udta` atom (format
+level) and files that only carry the tags in an `mdta` stream atom (muxed with
+`-movflags use_metadata_tags`, where the keys surface under the stream). A `mergeTags` /
+`firstNonEmpty` helper keeps the lookup order consistent. ffmpeg 6.1.1 itself only writes
+`creation_time` on a plain remux — the QuickTime `location`/`make`/`model` tags end up on the
+stream level, which is why the fallback matters for real camera files (iPhone/GoPro).
+
+Values are converted to protobuf: `RecordedAtString` emits UTC RFC3339Nano, or an empty string
+when the source had no creation time (stream-service tolerates and ignores empty values).
+
+## Project layout
+
+```
+transcoder-service/
+├── cmd/worker/main.go            # asynq server wiring, gRPC/mTLS client, metrics server
+├── cmd/exporter/main.go          # second binary: export queue (DB 4), failure reporter, mail
+├── internal/
+│   ├── metrics/metrics.go        # business counters + histogram (shared by both binaries)
+│   ├── processor/ffmpeg.go       # encoder resolution, buildArgs, TranscodeToHLS
+│   ├── processor/mux.go          # MuxToMP4 (stream copy, faststart) for the exporter
+│   ├── processor/metadata.go     # ffprobe → VideoMetadata
+│   ├── processor/processor.go    # VideoProcessor interfaces
+│   ├── processor/mock/           # gomock VideoProcessor
+│   ├── queue/payload.go          # task types + payloads (transcode, export)
+│   ├── queue/handler.go          # disk check, download, progress, upload, gRPC updates
+│   ├── queue/export_handler.go   # DownloadDir → MuxToMP4 → CompleteStreamExport → mail
+│   ├── service/mock/             # gomock StreamServiceClient
+│   ├── storage/                  # MinIO FileStorage (Download / DownloadDir / UploadDir)
+│   └── storage/mock/             # gomock FileStorage, MinioClient
+├── gen/go/stream/                # generated gRPC code (from ../proto)
+├── proto/stream/                 # copy of the shared stream_service.proto
+├── scripts/test-local-cover.sh   # go test + coverage HTML
+└── Dockerfile                    # alpine:3.18 + ffmpeg/libva, non-root appuser (uid 1000)
+```
+
+The build context is the **parent `services/` directory** (`docker build -f Dockerfile ..`), because
+the Dockerfile copies both `transcoder-service/` and the shared `shared/` module.
+
+## Commands
+
+```bash
+make build        # docker build with VERSION from git describe, tags VERSION + latest
+make push         # docker push both tags
+make deploy       # kubectl set image deployment/transcoder-service (no rollout wait)
+make test         # go test -v ./...
+make proto        # regenerate gen/go from proto/stream (needs protoc)
+make keda-deploy  # helm install KEDA into namespace keda
+make logs         # kubectl logs -f -l app=transcoder
+```
+
+`make deploy` runs `kubectl set image` but does not wait for the rollout — add
+`kubectl -n go-app rollout status deployment/transcoder-service` yourself. Because the tag comes
+from `git describe`, rebuilding an unchanged working tree reuses the tag and `set image` becomes
+a no-op; use `kubectl rollout restart deployment/transcoder-service -n go-app` in that case.
+
+## Deployment
+
+```
+deploy/k8s/
+├── keda/
+│   ├── auth.yaml                     # Redis trigger auth (secret casbin-redis, key redis-password)
+│   ├── scaledobject.yaml             # transcode worker: DB 2, listLength 2, scale 0..1
+│   └── exporter-scaledobject.yaml    # export worker: DB 4, listLength 1, scale 0..1
+└── transcoder/
+    ├── deployment.yaml               # transcode worker, image xomrkob/transcoder-service:<tag>, metrics :9090
+    ├── exporter-deployment.yaml      # export worker, same image, command /app/transcoder-exporter
+    └── service.yaml                  # ClusterIP for :9090 metrics scraping
+```
+
+KEDA polls Redis DB 2 lists `asynq:{default}:pending` and `asynq:{default}:active`
+(the latter declared as a zset) and scales when either exceeds `listLength: 2`;
+`minReplicaCount: 0`, `maxReplicaCount: 1`, `cooldownPeriod: 120`. The exporter is deliberately
+*not* identical: it watches the same two list names but on **DB 4** with `listLength: 1` — one
+queued export is already a multi-minute remux, so there is no reason to wait for a second task
+before scaling up, while the transcode worker's threshold trades cold-start latency against
+spurious scale-ups. Both manifests live in git but `make keda-deploy` only installs the KEDA chart
+— the `ScaledObject` and the `keda-redis-auth` `TriggerAuthentication` have to be applied by hand.
+Note that the transcoder shares the `default` queue with other asynq producers, so a busy default
+queue will also wake this worker.
+
+The Deployment is GPU-ready out of the box:
+
+- `hostPath /dev/dri` (DirectoryOrCreate) mounted at `/dev/dri` so VAAPI can reach the render node;
+- `securityContext.runAsUser: 0` — **overrides the image's `appuser` (uid 1000)**; required for
+  `/dev/dri` access on this homelab setup (a device plugin would be cleaner);
+- `terminationGracePeriodSeconds: 300` + `preStop: sleep 5` (down from 3600) — this makes rolling
+  updates terminate, but it **caps** a single transcode at roughly five minutes, so a longer encode
+  is SIGKILLed mid-run. The task stays invisible until its asynq lease/visibility timeout expires,
+  then another attempt (or a manual Reprocess) is needed; the retry re-downloads and re-transcodes
+  from scratch;
+- 10Gi `emptyDir` at `/tmp` is the scratch space for source + HLS output;
+- resources: requests `250m` CPU / `512Mi`, limits `2000m` / `1Gi` (tuned for a 4-core node);
+- `nodeSelector`/`tolerations` for a `gpu=true` node are present but **commented out** — enable
+  them once a GPU-capable k3s agent (`--node-label gpu=true`) joins.
+
+**The 5-minute cap is worse for the exporter than for the transcode worker.** Both Deployments
+set `terminationGracePeriodSeconds: 300` + `preStop: sleep 5`, but an export task is enqueued with
+`asynq.Timeout(30 * time.Minute)` (`exportTaskTimeout` in stream-service
+`internal/queue/payload.go:19`) — six times the pod's grace period. A rollout, eviction or node
+reboot during a long export therefore SIGKILLs the pod while asynq still considers the task active
+for the rest of that 30-minute window, so the `stream_exports` row sits in `pending` with nothing
+apparently running, and only the lease expiry plus `MaxRetry(1)` decides the outcome. The mismatch
+is much more likely to be hit here than in transcoding: the export path is I/O-bound, re-reading a
+multi-gigabyte HLS rendition and writing a remuxed copy of it, with no speedup from VAAPI.
+
+The exporter Deployment also carries `securityContext.runAsUser: 0` even though it mounts no
+`/dev/dri` and never touches the GPU — the override buys it nothing here (unlike the transcode
+worker, which needs root for the render node) and gives up the image's non-root `appuser`.
+
+The asynq worker scaffolding (`worker.NewAsynqServer`, ErrorHandler wiring) is shared with
+thumbnail — see `services/shared/worker`.
+
+## Export worker (`cmd/exporter`)
+
+The same image also builds `/app/transcoder-exporter`, a second binary with its own
+Deployment (`transcoder-exporter`) and its own KEDA `ScaledObject`. It turns an already
+transcoded HLS rendition into a single MP4 on demand, for the web download button.
+
+| | transcode worker | export worker |
+|---|---|---|
+| command | `/app/transcoder-worker` | `/app/transcoder-exporter` |
+| ConfigMap | `transcoder-service-config` | `transcoder-exporter-config` |
+| Redis DB (`REDIS_DB`) | `2` | `4` |
+| task | `video:transcode` | `video:export` |
+| ffmpeg | encodes (`libx264`/VAAPI) | stream copy (`-c copy`, no re-encode) |
+| /dev/dri | mounted | not mounted (CPU only) |
+
+The queue is asynq's `default` on a different **DB**, so the KEDA `listName` is the same
+(`asynq:{default}:pending`) and only `databaseIndex` differs. `EXPORT_QUEUE_DB` in the root
+`.env` feeds both this service and stream-service — the two DB numbers must match.
+
+Flow (`internal/queue/export_handler.go`): `DownloadDir(processed/<id>/)` → `MuxToMP4` →
+`UploadDir` → gRPC `CompleteStreamExport` → enqueue `email:download_ready` on the mailer
+queue (DB 2). The stream-service callback flips the row to `ready` and broadcasts
+`STREAM_EXPORT_READY`, so **stream-service owns the state** and the worker owns nothing.
+
+**How the task is enqueued** (stream-service `internal/queue/export_task_distributor.go`):
+
+| Option | Value | Why |
+|---|---|---|
+| `asynq.TaskID` | `export-<streamUUID>-<unixNano>` | unique **per enqueue**, not per stream — see below |
+| `asynq.MaxRetry` | `1` | the mux is idempotent, but re-running it after a failure costs a full re-download of the rendition |
+| `asynq.Timeout` | `30 * time.Minute` | a long single-file rendition of a long video; note this exceeds the pod's 300s termination grace, see Deployment |
+
+The timestamped `TaskID` is a deliberate retreat from a stable per-stream ID. asynq retains
+completed task IDs, so a stable `export-<streamUUID>` made a *later* export of the same stream
+fail with "task ID conflicts with another task" long after the first one had settled — which is
+also why a retried `POST /stream/:id/export` used to break with that error. Uniqueness per
+enqueue trades a different property away: **the `TaskID` does not deduplicate double clicks.** One
+export at a time per stream is enforced by the `stream_exports` row instead, whose state is reset
+conditionally so two retries cannot both queue a mux. The distributor still tolerates
+`asynq.ErrDuplicateTask` by logging and returning success, but on a per-enqueue ID that branch is
+effectively unreachable.
+
+Retry semantics are otherwise the same as the transcode worker — the handler is not resumable, so
+the single retry re-downloads the HLS directory and remuxes from scratch.
+
+Two deliberate choices:
+
+- The file is remuxed, never re-encoded (`-c copy -bsf:a aac_adtstoasc -movflags +faststart`),
+  so a "download" costs roughly as much as a copy, not a full transcode.
+- The mail is enqueued **after** the callback and a failure there is only logged: the file is
+  already downloadable, so a mailer outage must not mark the export failed.
+
+If the process dies mid-task, asynq hands the error to the `ErrorReporter` in
+`cmd/exporter/main.go`, which reports a failure back to stream-service — otherwise the row
+would stay `pending` forever. Permanent problems (no objects for the stream, a stream that
+cannot be decoded) return `asynq.SkipRetry` so they fail fast instead of burning retries.
+
+`transcoder-exporter-config` is the only transcoder process with SMTP credentials, because
+it is the only one that sends mail. `MAILER_REDIS_DB` points at the mailer's DB.
+
+## Known issues
+
+- **Exports are counted as transcodes.** The exporter increments the unlabelled
+  `transcoder_processed_total` / `transcoder_errors_total` / `transcoder_duration_seconds`, and
+  both Deployments are scraped on `:9090`, so nothing in a scrape distinguishes an MP4 mux from a
+  transcode. The Grafana panels "Transcodes processed total" and "Worker rates" (legend
+  `transcodes/s`) are `sum(transcoder_processed_total{namespace="$namespace"})` with no pod
+  filter, so every export inflates the transcode rate and the average duration. Fixing this needs
+  a `kind=transcode|export` label (or separate metric names) in `internal/metrics` plus a
+  dashboard update — deliberately not done here, it is a code change, not a docs one.
+- **A generic download failure is reported as success.** `internal/queue/handler.go` returns `nil`
+  for any `storage.Download` error that is neither `does not exist` nor
+  `no space left on device`, so the task is marked successful (counted in
+  `transcoder_processed_total` and as `success` in `asynq_task_processed_total`), the stream never
+  reaches `ready`, and no error update is sent — the stream just sits in `processing` until someone
+  notices. Only those two error strings are classified; anything else (auth, timeout, network,
+  `context deadline exceeded`) falls into this hole.
+- **Retries repeat the whole pipeline.** stream-service enqueues `video:transcode` with
+  `asynq.MaxRetry(1)`, and the handler is not resumable, so a failure in `UpdateStreamMetadata`,
+  `UploadDir` or `UpdateStreamStatus` re-downloads the source, re-runs ffmpeg and re-uploads the
+  whole HLS directory on the single retry. Failures that are actually deterministic (bad input,
+  missing source) are excluded only when the error text matches, see above.
+- **An early handler return kills ffmpeg abruptly.** `TranscodeToHLS` starts ffmpeg in its own
+  goroutine (`exec.CommandContext(ctx, …)`) and nothing joins it, so the disk guard, the
+  `ctx.Done()` path and the ffmpeg-error path all return while ffmpeg is still running. Asynq
+  cancels the task context right after the handler returns, which SIGKILLs the child — but the exit
+  status is dropped (nobody reads `cmd.Wait()`) and the deferred `os.RemoveAll` of
+  `/tmp/<uuid>` races with the dying process. Leftovers live until the next attempt or until the
+  pod is recycled (the `/tmp` mount is an `emptyDir`).
+- **Hardcoded metadata output.** `UpdateStreamMetadata` always reports `Format: "hls"` and
+  `Resolution: "1280x720"`, so the resolution shown in the UI does not reflect the real encode
+  (the VAAPI/libx264 bitrate and size limits make 1280x720 wrong for most sources).
+- **`UploadDir` swallows walk errors.** `internal/storage/minio_storage.go` returns `nil` when the
+  `filepath.WalkDir` callback fails, so a read error on the local HLS directory is silently
+  treated as success and the stream is marked `ready` with an incomplete upload.
+- **`make logs` selects the wrong label.** The target uses `-l app=transcoder`, but the
+  Deployment/pod label is `app=transcoder-service`, so the command returns nothing.
+- **`make all` never runs the tests.** It is `build → push → deploy`, so a broken build is shipped
+  to the cluster before `make test` is ever run. `make deploy` also ends at `kubectl set image`
+  without waiting for the rollout, and it re-uses the `git describe` tag, so rebuilding an
+  unchanged tree makes `set image` a silent no-op (see Commands for the `rollout restart`
+  workaround).
+- **Makefile `.PHONY` is out of sync.** It lists a non-existent `clean` target and omits the real
+  `test`, `logs`, and `keda-deploy` targets.
+- **Dockerfile `EXPOSE 8080` is stale.** The worker serves no application port; metrics are on
+  9090 in Kubernetes. `EXPOSE` is documentation-only and has no effect.
+- **`scripts/test-local-cover.sh` hardcodes a WSL path** (`/mnt/c/Users/XOMRKOB/Desktop/...`) for the
+  HTML report, so it fails anywhere else.
+- **Encoder misconfiguration is not fatal.** An unknown `TRANSCODER_ENCODER` value, or `vaapi`
+  without a render node, logs a warning and silently encodes with `libx264`. Check the
+  `transcode encoder selected` startup log to confirm which encoder is actually in use.
+- **Shared `default` queue.** KEDA cannot distinguish transcode tasks from any other producer on
+  the asynq `default` queue, so an unrelated backlog can scale this worker up.
+- **Task-type/type name typos.** The exported task constant is correctly spelled
+  `TaskVideoTranscoding` and the method is `HandleVideoTranscoderTask`, but the receiver *type* is
+  `HandleVideoTrancoder` ("Trancoder") while its constructor is
+  `NewHandleVideoTranscoder` (correctly spelled). `NewFFmpegProcessor` fails hard if `ffmpeg` is not
+  on `PATH`; only the *encoder* degrades gracefully.

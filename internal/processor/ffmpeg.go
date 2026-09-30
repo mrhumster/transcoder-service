@@ -5,21 +5,120 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
 
+const (
+	EncoderAuto  = "auto"
+	EncoderCPU   = "cpu"
+	EncoderVAAPI = "vaapi"
+
+	vaapiDevicePath = "/dev/dri/renderD128"
+)
+
 type FFmpegProcessor struct {
 	binPath string
+	encoder string
 }
 
-func NewFFmpegProcessor() (*FFmpegProcessor, error) {
+func NewFFmpegProcessor(mode string) (*FFmpegProcessor, error) {
 	path, err := exec.LookPath("ffmpeg")
 	if err != nil {
 		return nil, fmt.Errorf("ffmpeg not found in system: %w", err)
 	}
-	return &FFmpegProcessor{binPath: path}, nil
+	p := &FFmpegProcessor{binPath: path, encoder: EncoderCPU}
+	if err := p.resolveEncoder(mode); err != nil {
+		slog.Warn("transcode encoder resolution failed", "error", err)
+	}
+	return p, nil
+}
+
+// resolveEncoder selects the effective encoder. "auto" prefers hardware (VAAPI)
+// when a render node and the h264_vaapi encoder are available, falling back to
+// libx264 otherwise. "cpu" and "vaapi" force the mode; a missing capability
+// degrades to software encoding instead of failing the worker.
+func (p *FFmpegProcessor) resolveEncoder(mode string) error {
+	switch mode {
+	case EncoderVAAPI:
+		if !p.canVAAPI() {
+			p.encoder = EncoderCPU
+			return fmt.Errorf("vaapi requested but unavailable: %s", vaapiDevicePath)
+		}
+		p.encoder = EncoderVAAPI
+	case EncoderCPU:
+		p.encoder = EncoderCPU
+	case "", EncoderAuto:
+		if p.canVAAPI() {
+			p.encoder = EncoderVAAPI
+		} else {
+			p.encoder = EncoderCPU
+		}
+	default:
+		p.encoder = EncoderCPU
+		return fmt.Errorf("unknown encoder %q, falling back to %q", mode, EncoderCPU)
+	}
+	slog.Info("transcode encoder selected", "mode", mode, "encoder", p.encoder)
+	return nil
+}
+
+func (p *FFmpegProcessor) canVAAPI() bool {
+	if _, err := os.Stat(vaapiDevicePath); err != nil {
+		return false
+	}
+	out, err := exec.CommandContext(context.Background(), p.binPath, "-hide_banner", "-encoders").Output()
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.Contains(line, "h264_vaapi") {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *FFmpegProcessor) buildArgs(inputPath, outputDir string) []string {
+	playlistPath := fmt.Sprintf("%s/index.m3u8", outputDir)
+	args := []string{}
+	if p.encoder == EncoderVAAPI {
+		args = append(args, "-vaapi_device", vaapiDevicePath)
+	}
+	args = append(args,
+		"-i", inputPath,
+		"-progress", "pipe:1",
+	)
+	if p.encoder == EncoderVAAPI {
+		args = append(args,
+			"-vf", "format=nv12,hwupload",
+			"-c:v", "h264_vaapi",
+		)
+	} else {
+		args = append(args,
+			"-threads", "0",
+			"-c:v", "libx264",
+		)
+	}
+	args = append(args,
+		"-c:a", "aac",
+		"-b:v", "2500k",
+		"-maxrate", "2500k",
+		"-bufsize", "5000k",
+		"-hls_time", "10",
+		"-hls_list_size", "0",
+		"-hls_segment_filename", fmt.Sprintf("%s/seg_%%d.ts", outputDir),
+		"-f", "hls",
+		playlistPath,
+	)
+	return args
+}
+
+// Encoder returns the currently active encoder mode ("cpu" or "vaapi").
+func (p *FFmpegProcessor) Encoder() string {
+	return p.encoder
 }
 
 func (p *FFmpegProcessor) TranscodeToHLS(ctx context.Context, inputPath, outputDir string) (<-chan Progress, <-chan error) {
@@ -32,22 +131,7 @@ func (p *FFmpegProcessor) TranscodeToHLS(ctx context.Context, inputPath, outputD
 		defer close(progChan)
 		defer close(errChan)
 
-		playlistPath := fmt.Sprintf("%s/index.m3u8", outputDir)
-		args := []string{
-			"-i", inputPath,
-			"-progress", "pipe:1",
-			"-threads", "0",
-			"-c:v", "libx264",
-			"-c:a", "aac",
-			"-b:v", "2500k",
-			"-maxrate", "2500k",
-			"-bufsize", "5000k",
-			"-hls_time", "10",
-			"-hls_list_size", "0",
-			"-hls_segment_filename", fmt.Sprintf("%s/seg_%%d.ts", outputDir),
-			"-f", "hls",
-			playlistPath,
-		}
+		args := p.buildArgs(inputPath, outputDir)
 		cmd := exec.CommandContext(ctx, p.binPath, args...)
 
 		stdout, _ := cmd.StdoutPipe()
@@ -105,11 +189,20 @@ func (p *FFmpegProcessor) GetDuration(ctx context.Context, inputPath string) (fl
 		"-of", "default=noprint_wrappers=1:nokey=1",
 		inputPath,
 	}
-	cmd := exec.CommandContext(ctx, "ffprobe", args...)
+	cmd := exec.CommandContext(ctx, p.probePath(), args...)
 	out, err := cmd.Output()
 	if err != nil {
 		return 0, nil
 	}
 	durationStr := strings.TrimSpace(string(out))
 	return strconv.ParseFloat(durationStr, 64)
+}
+
+// probePath resolves ffprobe relative to the ffmpeg binary directory.
+func (p *FFmpegProcessor) probePath() string {
+	probe := filepath.Join(filepath.Dir(p.binPath), "ffprobe")
+	if _, err := os.Stat(probe); err == nil {
+		return probe
+	}
+	return "ffprobe"
 }

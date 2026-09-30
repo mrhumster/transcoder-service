@@ -10,8 +10,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"time"
+
 	"github.com/hibiken/asynq"
 	pb "github.com/mrhumster/transcoder-service/gen/go/stream"
+	"github.com/mrhumster/transcoder-service/internal/metrics"
 	"github.com/mrhumster/transcoder-service/internal/processor"
 	"github.com/mrhumster/transcoder-service/internal/storage"
 )
@@ -56,6 +59,19 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 		return fmt.Errorf("json unmarshal failed: %v", err)
 	}
 
+	start := time.Now()
+	taskErr := h.handleTranscode(ctx, p)
+	if taskErr != nil {
+		metrics.Errors.Inc()
+	} else {
+		metrics.Processed.Inc()
+		metrics.Duration.Observe(time.Since(start).Seconds())
+	}
+	return taskErr
+}
+
+func (h *HandleVideoTrancoder) handleTranscode(ctx context.Context, p VideoTranscodingPayload) error {
+
 	workDir := fmt.Sprintf("/tmp/%s", p.StreamUUID)
 	inputLocal := workDir + "/input.mp4"
 	hlsOutputDir := workDir + "/hls"
@@ -86,24 +102,38 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 		}
 
 		if strings.Contains(err.Error(), "no space left on device") {
+			metrics.DiskFull.Inc()
 			return fmt.Errorf("disk full: %w", asynq.SkipRetry)
 		}
 
 		return nil
 	}
 
-	duration, err := h.processor.GetDuration(ctx, inputLocal)
+	meta, err := h.processor.ProbeMetadata(ctx, inputLocal)
 	if err != nil {
-		slog.Error("failed to get duration", "error", err)
-		duration = 0
+		slog.Error("metadata probe failed", "error", err)
 	}
-	slog.Info("getting duration", "value", duration)
+	if stat, statErr := os.Stat(inputLocal); statErr == nil {
+		meta.Size = stat.Size()
+	}
+	slog.Info("probed source metadata",
+		"uuid", p.StreamUUID,
+		"duration", meta.Duration,
+		"size", meta.Size,
+		"recorded_at", meta.RecordedAtString(),
+		"location", meta.Location,
+		"camera", meta.Camera,
+	)
 
 	_, err = h.streamService.UpdateStreamMetadata(ctx, &pb.UpdateStreamMetadataRequest{
 		StreamUuid: p.StreamUUID.String(),
-		Duration:   int32(duration),
+		Duration:   int32(meta.Duration),
+		Size:       meta.Size,
 		Format:     "hls",
 		Resolution: "1280x720",
+		RecordedAt: meta.RecordedAtString(),
+		Location:   meta.Location,
+		Camera:     meta.Camera,
 	})
 	if err != nil {
 		slog.Error("update metadata failed", "error", err)
@@ -132,8 +162,10 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 					StreamUuid: p.StreamUUID.String(),
 					Progress:   0,
 					Steps:      []string{"Transcoding"},
+					Task:       "transcode",
 					Error:      "Not enough disk space on worker",
 				})
+				metrics.DiskFull.Inc()
 				return fmt.Errorf("no space left: %w", asynq.SkipRetry)
 			}
 
@@ -143,6 +175,7 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 					StreamUuid: p.StreamUUID.String(),
 					Progress:   int32(prog.Percent),
 					Steps:      []string{"Transcoding"},
+					Task:       "transcode",
 				}
 				_, err := h.streamService.UpdateStreamProcessing(ctx, updateProgReq)
 
@@ -165,6 +198,7 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 					StreamUuid: p.StreamUUID.String(),
 					Progress:   int32(lastSentPercent),
 					Steps:      []string{"Transcoding"},
+					Task:       "transcode",
 					Error:      fmt.Sprintf("failed convert: %s", err.Error()),
 				})
 				slog.Error("FFMPEG ERROR", "err", err)
@@ -174,6 +208,7 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 				return err
 			}
 		case <-ctx.Done():
+			metrics.Aborted.Inc()
 			slog.Warn("Context cancelled, stopping...")
 			return ctx.Err()
 		}
@@ -189,6 +224,7 @@ upload:
 		StreamUuid: p.StreamUUID.String(),
 		Progress:   int32(100),
 		Steps:      []string{"Uploading to the storage"},
+		Task:       "transcode",
 	}
 	_, err = h.streamService.UpdateStreamProcessing(ctx, updateProgReq)
 	if err != nil {
@@ -218,6 +254,7 @@ upload:
 		StreamUuid: p.StreamUUID.String(),
 		Progress:   int32(100),
 		Steps:      []string{},
+		Task:       "transcode",
 	}
 	_, err = h.streamService.UpdateStreamProcessing(ctx, updateProgReq)
 	if err != nil {

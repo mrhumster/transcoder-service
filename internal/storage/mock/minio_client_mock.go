@@ -69,3 +69,18 @@ func (mr *MockMinIOClientMockRecorder) FPutObject(ctx, bucketName, objectName, f
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FPutObject", reflect.TypeOf((*MockMinIOClient)(nil).FPutObject), ctx, bucketName, objectName, filePath, opts)
 }
+
+// ListObjectNames mocks base method.
+func (m *MockMinIOClient) ListObjectNames(ctx context.Context, bucketName, prefix string) ([]string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListObjectNames", ctx, bucketName, prefix)
+	ret0, _ := ret[0].([]string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListObjectNames indicates an expected call of ListObjectNames.
+func (mr *MockMinIOClientMockRecorder) ListObjectNames(ctx, bucketName, prefix any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListObjectNames", reflect.TypeOf((*MockMinIOClient)(nil).ListObjectNames), ctx, bucketName, prefix)
+}

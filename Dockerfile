@@ -1,16 +1,22 @@
-FROM golang:1.25-alpine AS builder
+FROM golang:1.25.14-alpine AS builder
 ARG VERSION=0.0.1
 ARG BUILD_DATE=11.03.2026
 
 WORKDIR /app
-COPY go.mod ./ 
+COPY transcoder-service/go.mod ./
 
-RUN if [ -f go.sum ]; then cp go.sum .; fi
+RUN if [ -f transcoder-service/go.sum ]; then cp transcoder-service/go.sum .; fi
+COPY shared /shared
 RUN go mod download
-COPY . .
+COPY transcoder-service/. .
+# Two binaries, one image: the transcode worker stays the default entrypoint,
+# the on-demand exporter overrides the command in its own Deployment.
 RUN CGO_ENABLED=0 GOOS=linux go build \
   -ldflags="-w -s -X main.version=$VERSION -X main.buildDate=$BUILD_DATE" \
-  -o transcoder-worker ./cmd/worker/main.go
+  -o transcoder-worker ./cmd/worker/main.go && \
+  CGO_ENABLED=0 GOOS=linux go build \
+  -ldflags="-w -s -X main.version=$VERSION -X main.buildDate=$BUILD_DATE" \
+  -o transcoder-exporter ./cmd/exporter/main.go
 
 FROM alpine:3.18
 ARG VERSION=0.0.1
@@ -18,12 +24,15 @@ ARG BUILD_DATE=11.03.2026
 LABEL version=$VERSION \
   build-date=$BUILD_DATE \
   maintainer="me@xomrkob.ru"
-RUN apk add --no-cache ffmpeg ca-certificates
+RUN apk add --no-cache ffmpeg ca-certificates libva mesa-dri-gallium
+# libva looks for DRI drivers in /usr/lib/dri; Alpine ships them under xorg modules dir.
+RUN mkdir -p /usr/lib/dri && \
+  ln -sf ../xorg/modules/dri/radeonsi_dri.so /usr/lib/dri/radeonsi_dri.so
 RUN addgroup -g 1000 appgroup && \
   adduser -D -u 1000 -G appgroup appuser
 WORKDIR /app 
 COPY --from=builder --chown=appuser:appgroup /app/transcoder-worker .
-COPY --from=builder --chown=appuser:appgroup /app/config ./config
+COPY --from=builder --chown=appuser:appgroup /app/transcoder-exporter .
 EXPOSE 8080
 
 USER appuser

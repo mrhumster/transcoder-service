@@ -22,6 +22,7 @@ const (
 	StreamService_UpdateStreamStatus_FullMethodName     = "/stream.StreamService/UpdateStreamStatus"
 	StreamService_UpdateStreamMetadata_FullMethodName   = "/stream.StreamService/UpdateStreamMetadata"
 	StreamService_UpdateStreamProcessing_FullMethodName = "/stream.StreamService/UpdateStreamProcessing"
+	StreamService_CompleteStreamExport_FullMethodName   = "/stream.StreamService/CompleteStreamExport"
 )
 
 // StreamServiceClient is the client API for StreamService service.
@@ -31,6 +32,7 @@ type StreamServiceClient interface {
 	UpdateStreamStatus(ctx context.Context, in *UpdateStreamStatusRequest, opts ...grpc.CallOption) (*UpdateStreamStatusResponse, error)
 	UpdateStreamMetadata(ctx context.Context, in *UpdateStreamMetadataRequest, opts ...grpc.CallOption) (*UpdateStreamMetadataResponse, error)
 	UpdateStreamProcessing(ctx context.Context, in *UpdateStreamProcessingRequest, opts ...grpc.CallOption) (*UpdateStreamProcessingResponse, error)
+	CompleteStreamExport(ctx context.Context, in *CompleteStreamExportRequest, opts ...grpc.CallOption) (*CompleteStreamExportResponse, error)
 }
 
 type streamServiceClient struct {
@@ -71,6 +73,16 @@ func (c *streamServiceClient) UpdateStreamProcessing(ctx context.Context, in *Up
 	return out, nil
 }
 
+func (c *streamServiceClient) CompleteStreamExport(ctx context.Context, in *CompleteStreamExportRequest, opts ...grpc.CallOption) (*CompleteStreamExportResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CompleteStreamExportResponse)
+	err := c.cc.Invoke(ctx, StreamService_CompleteStreamExport_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // StreamServiceServer is the server API for StreamService service.
 // All implementations must embed UnimplementedStreamServiceServer
 // for forward compatibility.
@@ -78,6 +90,7 @@ type StreamServiceServer interface {
 	UpdateStreamStatus(context.Context, *UpdateStreamStatusRequest) (*UpdateStreamStatusResponse, error)
 	UpdateStreamMetadata(context.Context, *UpdateStreamMetadataRequest) (*UpdateStreamMetadataResponse, error)
 	UpdateStreamProcessing(context.Context, *UpdateStreamProcessingRequest) (*UpdateStreamProcessingResponse, error)
+	CompleteStreamExport(context.Context, *CompleteStreamExportRequest) (*CompleteStreamExportResponse, error)
 	mustEmbedUnimplementedStreamServiceServer()
 }
 
@@ -96,6 +109,9 @@ func (UnimplementedStreamServiceServer) UpdateStreamMetadata(context.Context, *U
 }
 func (UnimplementedStreamServiceServer) UpdateStreamProcessing(context.Context, *UpdateStreamProcessingRequest) (*UpdateStreamProcessingResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateStreamProcessing not implemented")
+}
+func (UnimplementedStreamServiceServer) CompleteStreamExport(context.Context, *CompleteStreamExportRequest) (*CompleteStreamExportResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CompleteStreamExport not implemented")
 }
 func (UnimplementedStreamServiceServer) mustEmbedUnimplementedStreamServiceServer() {}
 func (UnimplementedStreamServiceServer) testEmbeddedByValue()                       {}
@@ -172,6 +188,24 @@ func _StreamService_UpdateStreamProcessing_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
+func _StreamService_CompleteStreamExport_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CompleteStreamExportRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(StreamServiceServer).CompleteStreamExport(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: StreamService_CompleteStreamExport_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(StreamServiceServer).CompleteStreamExport(ctx, req.(*CompleteStreamExportRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // StreamService_ServiceDesc is the grpc.ServiceDesc for StreamService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -190,6 +224,10 @@ var StreamService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateStreamProcessing",
 			Handler:    _StreamService_UpdateStreamProcessing_Handler,
+		},
+		{
+			MethodName: "CompleteStreamExport",
+			Handler:    _StreamService_CompleteStreamExport_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

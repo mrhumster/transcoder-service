@@ -13,4 +13,5 @@ type Progress struct {
 type VideoProcessor interface {
 	TranscodeToHLS(ctx context.Context, inputPath, outputDir string) (<-chan Progress, <-chan error)
 	GetDuration(ctx context.Context, inputPath string) (float64, error)
+	ProbeMetadata(ctx context.Context, inputPath string) (VideoMetadata, error)
 }
