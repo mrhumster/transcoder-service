@@ -17,6 +17,7 @@ service StreamService {
   rpc UpdateStreamStatus(UpdateStreamStatusRequest) returns (UpdateStreamStatusResponse);
   rpc UpdateStreamMetadata(UpdateStreamMetadataRequest) returns (UpdateStreamMetadataResponse);
   rpc UpdateStreamProcessing(UpdateStreamProcessingRequest) returns (UpdateStreamProcessingResponse);
+  rpc CompleteStreamExport(CompleteStreamExportRequest) returns (CompleteStreamExportResponse);
 }
 
 message UpdateStreamStatusRequest {
@@ -52,5 +53,19 @@ message UpdateStreamProcessingRequest {
 }
 
 message UpdateStreamProcessingResponse {
+  bool updated = 1;
+}
+
+// CompleteStreamExport reports the outcome of a single-file export back to
+// stream-service, which owns the state row. success = false means error carries
+// the reason and the row is marked failed.
+message CompleteStreamExportRequest {
+  string stream_uuid = 1;
+  bool success = 2;
+  int64 size = 3;
+  string error = 4;
+}
+
+message CompleteStreamExportResponse {
   bool updated = 1;
 }

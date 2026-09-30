@@ -18,6 +18,18 @@ import (
 	"go.uber.org/mock/gomock"
 )
 
+// closedProgressChans returns both channels already closed, which is what the
+// transcode handler needs to fall out of its select loop and reach the upload
+// phase. Returning nil (as these tests used to) leaves the handler parked on two
+// nil channels forever, and gomock rejects a single value for a two-result call.
+func closedProgressChans() (<-chan processor.Progress, <-chan error) {
+	prog := make(chan processor.Progress)
+	errs := make(chan error)
+	close(prog)
+	close(errs)
+	return prog, errs
+}
+
 func TestHandle_HandleVideoTranscoderTask(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
@@ -54,12 +66,21 @@ func TestHandle_HandleVideoTranscoderTask(t *testing.T) {
 				gomock.Any(),
 				gomock.Any()).
 			Return(&stream.UpdateStreamMetadataResponse{}, nil)
+		progChan, errChan := closedProgressChans()
 		mockProcessor.EXPECT().
 			TranscodeToHLS(
 				gomock.Any(),
 				gomock.Any(),
 				gomock.Any()).
-			Return(nil)
+			Return(progChan, errChan)
+		// The handler reports the upload phase and the final state through
+		// UpdateStreamProcessing; these blocks do not assert on it.
+		mockService.EXPECT().
+			UpdateStreamProcessing(
+				gomock.Any(),
+				gomock.Any()).
+			Return(&stream.UpdateStreamProcessingResponse{Updated: true}, nil).
+			AnyTimes()
 		mockStorage.EXPECT().
 			UploadDir(
 				gomock.Any(),
@@ -140,12 +161,21 @@ func TestHandle_HandleVideoTranscoderTask(t *testing.T) {
 				gomock.Any(),
 				gomock.Any()).
 			Return(&stream.UpdateStreamMetadataResponse{}, nil)
+		progChan, errChan := closedProgressChans()
 		mockProcessor.EXPECT().
 			TranscodeToHLS(
 				gomock.Any(),
 				gomock.Any(),
 				gomock.Any()).
-			Return(nil)
+			Return(progChan, errChan)
+		// The handler reports the upload phase and the final state through
+		// UpdateStreamProcessing; these blocks do not assert on it.
+		mockService.EXPECT().
+			UpdateStreamProcessing(
+				gomock.Any(),
+				gomock.Any()).
+			Return(&stream.UpdateStreamProcessingResponse{Updated: true}, nil).
+			AnyTimes()
 		mockStorage.EXPECT().
 			UploadDir(
 				gomock.Any(),
@@ -191,12 +221,21 @@ func TestHandle_HandleVideoTranscoderTask(t *testing.T) {
 				gomock.Any(),
 				gomock.Any()).
 			Return(&stream.UpdateStreamMetadataResponse{}, nil)
+		progChan, errChan := closedProgressChans()
 		mockProcessor.EXPECT().
 			TranscodeToHLS(
 				gomock.Any(),
 				gomock.Any(),
 				gomock.Any()).
-			Return(nil)
+			Return(progChan, errChan)
+		// The handler reports the upload phase and the final state through
+		// UpdateStreamProcessing; these blocks do not assert on it.
+		mockService.EXPECT().
+			UpdateStreamProcessing(
+				gomock.Any(),
+				gomock.Any()).
+			Return(&stream.UpdateStreamProcessingResponse{Updated: true}, nil).
+			AnyTimes()
 		mockStorage.EXPECT().
 			UploadDir(
 				gomock.Any(),
@@ -286,12 +325,25 @@ func TestHandle_HandleVideoTranscoderTask(t *testing.T) {
 				gomock.Any(),
 				gomock.Any()).
 			Return(&stream.UpdateStreamMetadataResponse{}, nil)
+		// A transcode failure arrives on the error channel; the method itself
+		// returns channels, so the error cannot be returned from the call.
+		failProg := make(chan processor.Progress)
+		failErrs := make(chan error, 1)
+		failErrs <- fmt.Errorf("processing error")
+		close(failProg)
+		close(failErrs)
 		mockProcessor.EXPECT().
 			TranscodeToHLS(
 				gomock.Any(),
 				gomock.Any(),
 				gomock.Any()).
-			Return(fmt.Errorf("processing error"))
+			Return(failProg, failErrs)
+		mockService.EXPECT().
+			UpdateStreamProcessing(
+				gomock.Any(),
+				gomock.Any()).
+			Return(&stream.UpdateStreamProcessingResponse{Updated: true}, nil).
+			AnyTimes()
 		err := handler.HandleVideoTranscoderTask(ctx, task)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "processing error")

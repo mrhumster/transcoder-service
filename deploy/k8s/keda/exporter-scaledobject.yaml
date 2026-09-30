@@ -1,0 +1,34 @@
+# Scales the export worker from the export queue. The queue is asynq's default
+# one, but on a different Redis DB than transcoding, so only databaseIndex
+# differs from transcoder-keda.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: transcoder-exporter-keda
+  namespace: go-app
+spec:
+  scaleTargetRef:
+    name: transcoder-exporter
+  cooldownPeriod: 120
+  # Exports are user-facing and interactive: a long one must not pile up behind
+  # another. One at a time, the rest stay queued.
+  maxReplicaCount: 1
+  minReplicaCount: 0
+  triggers:
+    - type: redis
+      authenticationRef:
+        name: keda-redis-auth
+      metadata:
+        address: casbin-redis-master.go-app.svc.cluster.local:6379
+        databaseIndex: "4"
+        listName: "asynq:{default}:pending"
+        listLength: "1"
+    - type: redis
+      authenticationRef:
+        name: keda-redis-auth
+      metadata:
+        address: casbin-redis-master.go-app.svc.cluster.local:6379
+        databaseIndex: "4"
+        listName: "asynq:{default}:active"
+        listLength: "1"
+        type: "zset"

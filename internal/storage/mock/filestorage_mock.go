@@ -54,6 +54,20 @@ func (mr *MockFileStorageMockRecorder) Download(ctx, remoteKey, localPath any) *
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Download", reflect.TypeOf((*MockFileStorage)(nil).Download), ctx, remoteKey, localPath)
 }
 
+// DownloadDir mocks base method.
+func (m *MockFileStorage) DownloadDir(ctx context.Context, remoteDir, localDir string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DownloadDir", ctx, remoteDir, localDir)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DownloadDir indicates an expected call of DownloadDir.
+func (mr *MockFileStorageMockRecorder) DownloadDir(ctx, remoteDir, localDir any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DownloadDir", reflect.TypeOf((*MockFileStorage)(nil).DownloadDir), ctx, remoteDir, localDir)
+}
+
 // Upload mocks base method.
 func (m *MockFileStorage) Upload(ctx context.Context, remoteKey, localPath, contentType string) error {
 	m.ctrl.T.Helper()

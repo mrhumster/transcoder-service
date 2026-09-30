@@ -1,0 +1,96 @@
+# On-demand MP4 exporter. Same image as the transcoder worker, different
+# binary, different queue: it consumes the export queue on its own Redis DB so
+# exports never sit behind a transcode (and vice versa).
+# https://kubernetes.io/docs/concepts/workloads/controllers/deployment/
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transcoder-exporter
+  namespace: go-app
+  labels:
+    app: transcoder-exporter
+spec:
+  # The KEDA ScaledObject owns the replica count; this is only the initial value.
+  replicas: 0
+  selector:
+    matchLabels:
+      app: transcoder-exporter
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: transcoder-exporter
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+      labels:
+        app: transcoder-exporter
+    spec:
+      # The export task is bounded by asynq's task timeout; give the pod room to
+      # finish the current mux and report the result before it is killed.
+      terminationGracePeriodSeconds: 300
+      containers:
+        - name: transcoder-exporter
+          image: xomrkob/transcoder-service:latest
+          imagePullPolicy: Always
+          command: ["/app/transcoder-exporter"]
+          ports:
+            - name: metrics
+              containerPort: 9090
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 5"]
+          resources:
+            # Remuxing is stream copy, so it is I/O bound, not CPU bound.
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            runAsUser: 0
+          envFrom:
+            - configMapRef:
+                name: transcoder-exporter-config
+            - configMapRef:
+                name: go-app-config
+            - secretRef:
+                name: casbin-redis
+            - secretRef:
+                name: minio-credentials
+          env:
+            - name: GRPC_TLS_ENABLED
+              value: "true"
+            - name: GRPC_TLS_CERT
+              value: "/tls/grpc/tls.crt"
+            - name: GRPC_TLS_KEY
+              value: "/tls/grpc/tls.key"
+            - name: GRPC_TLS_CA
+              value: "/tls/grpc/ca.crt"
+          volumeMounts:
+            - name: grpc-tls
+              mountPath: /tls/grpc
+              readOnly: true
+            # The HLS segments and the muxed file are staged on local disk.
+            - name: tmp-disk
+              mountPath: /tmp
+      volumes:
+        - name: grpc-tls
+          secret:
+            secretName: grpc-transcoder-tls
+        - name: tmp-disk
+          emptyDir:
+            sizeLimit: 20Gi
+      restartPolicy: Always

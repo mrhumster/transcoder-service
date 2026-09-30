@@ -144,6 +144,8 @@ See `services/shared/README.md` for the loader.
 | `WORKER_SHUTDOWN_TIMEOUT` | `50m` | |
 | `WORKER_RETRY_DELAY` | `30s` | parsed by the config loader but **not** wired into the asynq server — the asynq default backoff applies |
 | `TRANSCODER_ENCODER` | `auto` | `auto` \| `cpu` \| `vaapi` |
+| `MAILER_REDIS_DB` | `2` | **export worker only**: DB of the mailer queue |
+| `SMTP_ADDR` / `SMTP_USER` / `SMTP_FROM` / `FRONTEND_URL` | — | **export worker only**; export mails are disabled when `SMTP_ADDR` or `FRONTEND_URL` is empty |
 
 ## gRPC / mTLS
 
@@ -249,11 +251,13 @@ a no-op; use `kubectl rollout restart deployment/transcoder-service -n go-app` i
 ```
 deploy/k8s/
 ├── keda/
-│   ├── auth.yaml           # Redis trigger auth (secret casbin-redis, key redis-password)
-│   └── scaledobject.yaml   # scale 0..1 on default-queue length
+│   ├── auth.yaml                     # Redis trigger auth (secret casbin-redis, key redis-password)
+│   ├── scaledobject.yaml             # transcode worker: scale 0..1 on default-queue length (DB 2)
+│   └── exporter-scaledobject.yaml    # export worker: same, on DB 4
 └── transcoder/
-    ├── deployment.yaml     # image xomrkob/transcoder-service:<tag>, metrics :9090
-    └── service.yaml        # ClusterIP for :9090 metrics scraping
+    ├── deployment.yaml               # transcode worker, image xomrkob/transcoder-service:<tag>, metrics :9090
+    ├── exporter-deployment.yaml      # export worker, same image, command /app/transcoder-exporter
+    └── service.yaml                  # ClusterIP for :9090 metrics scraping
 ```
 
 KEDA polls Redis DB 2 lists `asynq:{default}:pending` and `asynq:{default}:active`
@@ -280,6 +284,45 @@ The Deployment is GPU-ready out of the box:
 
 The asynq worker scaffolding (`worker.NewAsynqServer`, ErrorHandler wiring) is shared with
 thumbnail — see `services/shared/worker`.
+
+## Export worker (`cmd/exporter`)
+
+The same image also builds `/app/transcoder-exporter`, a second binary with its own
+Deployment (`transcoder-exporter`) and its own KEDA `ScaledObject`. It turns an already
+transcoded HLS rendition into a single MP4 on demand, for the web download button.
+
+| | transcode worker | export worker |
+|---|---|---|
+| command | `/app/transcoder-worker` | `/app/transcoder-exporter` |
+| ConfigMap | `transcoder-service-config` | `transcoder-exporter-config` |
+| Redis DB (`REDIS_DB`) | `2` | `4` |
+| task | `video:transcode` | `video:export` |
+| ffmpeg | encodes (`libx264`/VAAPI) | stream copy (`-c copy`, no re-encode) |
+| /dev/dri | mounted | not mounted (CPU only) |
+
+The queue is asynq's `default` on a different **DB**, so the KEDA `listName` is the same
+(`asynq:{default}:pending`) and only `databaseIndex` differs. `EXPORT_QUEUE_DB` in the root
+`.env` feeds both this service and stream-service — the two DB numbers must match.
+
+Flow (`internal/queue/export_handler.go`): `DownloadDir(processed/<id>/)` → `MuxToMP4` →
+`UploadDir` → gRPC `CompleteStreamExport` → enqueue `email:download_ready` on the mailer
+queue (DB 2). The stream-service callback flips the row to `ready` and broadcasts
+`STREAM_EXPORT_READY`, so **stream-service owns the state** and the worker owns nothing.
+
+Two deliberate choices:
+
+- The file is remuxed, never re-encoded (`-c copy -bsf:a aac_adtstoasc -movflags +faststart`),
+  so a "download" costs roughly as much as a copy, not a full transcode.
+- The mail is enqueued **after** the callback and a failure there is only logged: the file is
+  already downloadable, so a mailer outage must not mark the export failed.
+
+If the process dies mid-task, asynq hands the error to the `ErrorReporter` in
+`cmd/exporter/main.go`, which reports a failure back to stream-service — otherwise the row
+would stay `pending` forever. Permanent problems (no objects for the stream, a stream that
+cannot be decoded) return `asynq.SkipRetry` so they fail fast instead of burning retries.
+
+`transcoder-exporter-config` is the only transcoder process with SMTP credentials, because
+it is the only one that sends mail. `MAILER_REDIS_DB` points at the mailer's DB.
 
 ## Known issues
 
