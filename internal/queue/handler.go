@@ -210,6 +210,30 @@ func (h *HandleVideoTrancoder) handleTranscode(ctx context.Context, p VideoTrans
 		case <-ctx.Done():
 			metrics.Aborted.Inc()
 			slog.Warn("Context cancelled, stopping...")
+			// On the last attempt the failure is terminal (asynq will archive the
+			// task), so report it — otherwise the DB keeps a frozen progress with
+			// no error and the stream looks stuck. Earlier attempts are retried
+			// silently: a mid-retry error would flip the stream to StatusError.
+			if retryCount, ok := asynq.GetRetryCount(ctx); ok {
+				if maxRetry, mok := asynq.GetMaxRetry(ctx); mok && retryCount >= maxRetry {
+					reportProgress := lastSentPercent
+					if reportProgress < 0 {
+						reportProgress = 0
+					}
+					reportCtx, cancelReport := context.WithTimeout(context.Background(), 15*time.Second)
+					_, err := h.streamService.UpdateStreamProcessing(reportCtx, &pb.UpdateStreamProcessingRequest{
+						StreamUuid: p.StreamUUID.String(),
+						Progress:   reportProgress,
+						Steps:      []string{"Transcoding"},
+						Task:       "transcode",
+						Error:      fmt.Sprintf("transcode interrupted: %s", ctx.Err().Error()),
+					})
+					cancelReport()
+					if err != nil {
+						slog.Error("failed to report cancelled transcode", "error", err)
+					}
+				}
+			}
 			return ctx.Err()
 		}
 
