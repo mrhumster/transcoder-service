@@ -12,6 +12,7 @@ import (
 
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	pb "github.com/mrhumster/transcoder-service/gen/go/stream"
 	"github.com/mrhumster/transcoder-service/internal/metrics"
@@ -70,6 +71,81 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 	return taskErr
 }
 
+// presignTTL must outlast the longest transcode task so ffmpeg can keep
+// re-seeking on the url for the entire source playback.
+const presignTTL = 24 * time.Hour
+
+// resolveSource picks the input for ffprobe/ffmpeg and returns it together
+// with the probed metadata. The preferred path is a presigned url: ffmpeg
+// then reads the object straight from the storage with Range seeks, so a
+// multi-gigabyte source never lands on the worker disk (previously the whole
+// file was downloaded, which capped usable inputs at ~1.8 GB of page cache
+// and the 10 Gi emptyDir). When presigning or probing over http fails, it
+// falls back to downloading the object locally — the pre-url behaviour.
+// A download failure maps onto asynq.SkipRetry for terminal cases.
+func (h *HandleVideoTrancoder) resolveSource(ctx context.Context, p VideoTranscodingPayload, inputLocal string) (string, processor.VideoMetadata, error) {
+	inputURL, presignErr := h.storage.GeneratePresignedURL(ctx, p.InputPath, presignTTL)
+	if presignErr != nil {
+		slog.Warn("presign failed, falling back to local download",
+			"uuid", p.StreamUUID, "path", p.InputPath, "error", presignErr)
+	} else {
+		meta, probeErr := h.processor.ProbeMetadata(ctx, inputURL)
+		if probeErr == nil {
+			if size, statErr := h.storage.StatSize(ctx, p.InputPath); statErr == nil {
+				meta.Size = size
+			} else {
+				slog.Warn("stat source failed, keeping probed size",
+					"uuid", p.StreamUUID, "path", p.InputPath, "error", statErr)
+			}
+			logProbedMetadata(p.StreamUUID, meta)
+			return inputURL, meta, nil
+		}
+		slog.Warn("probe over presigned url failed, falling back to local download",
+			"uuid", p.StreamUUID, "path", p.InputPath, "error", probeErr)
+	}
+
+	slog.Info("downloading source", "path", p.InputPath)
+	if err := h.storage.Download(ctx, p.InputPath, inputLocal); err != nil {
+		slog.Error("download failed",
+			"uuid", p.StreamUUID,
+			"inputPath", p.InputPath,
+			"inputLocal", inputLocal,
+			"error", err)
+
+		if strings.Contains(err.Error(), "does not exist") {
+			return "", processor.VideoMetadata{}, fmt.Errorf("source missing: %w", asynq.SkipRetry)
+		}
+		if strings.Contains(err.Error(), "no space left on device") {
+			metrics.DiskFull.Inc()
+			return "", processor.VideoMetadata{}, fmt.Errorf("disk full: %w", asynq.SkipRetry)
+		}
+		return "", processor.VideoMetadata{}, fmt.Errorf("download failed: %w", err)
+	}
+
+	// A probe failure here is non-terminal (kept as a log line): the stream
+	// still transcodes, it just publishes empty metadata fields.
+	meta, err := h.processor.ProbeMetadata(ctx, inputLocal)
+	if err != nil {
+		slog.Error("metadata probe failed", "error", err)
+	}
+	if stat, statErr := os.Stat(inputLocal); statErr == nil {
+		meta.Size = stat.Size()
+	}
+	logProbedMetadata(p.StreamUUID, meta)
+	return inputLocal, meta, nil
+}
+
+func logProbedMetadata(id uuid.UUID, meta processor.VideoMetadata) {
+	slog.Info("probed source metadata",
+		"uuid", id,
+		"duration", meta.Duration,
+		"size", meta.Size,
+		"recorded_at", meta.RecordedAtString(),
+		"location", meta.Location,
+		"camera", meta.Camera,
+	)
+}
+
 func (h *HandleVideoTrancoder) handleTranscode(ctx context.Context, p VideoTranscodingPayload) error {
 
 	workDir := fmt.Sprintf("/tmp/%s", p.StreamUUID)
@@ -89,41 +165,10 @@ func (h *HandleVideoTrancoder) handleTranscode(ctx context.Context, p VideoTrans
 
 	defer os.RemoveAll(outputDir)
 
-	slog.Info("downloading source", "path", p.InputPath)
-	if err := h.storage.Download(ctx, p.InputPath, inputLocal); err != nil {
-		slog.Error("downaload failed",
-			"uuid", p.StreamUUID,
-			"inputPath", p.InputPath,
-			"inputLocal", inputLocal,
-			"error", err)
-
-		if strings.Contains(err.Error(), "does not exist") {
-			return fmt.Errorf("source missing: %w", asynq.SkipRetry)
-		}
-
-		if strings.Contains(err.Error(), "no space left on device") {
-			metrics.DiskFull.Inc()
-			return fmt.Errorf("disk full: %w", asynq.SkipRetry)
-		}
-
-		return nil
-	}
-
-	meta, err := h.processor.ProbeMetadata(ctx, inputLocal)
+	inputSrc, meta, err := h.resolveSource(ctx, p, inputLocal)
 	if err != nil {
-		slog.Error("metadata probe failed", "error", err)
+		return err
 	}
-	if stat, statErr := os.Stat(inputLocal); statErr == nil {
-		meta.Size = stat.Size()
-	}
-	slog.Info("probed source metadata",
-		"uuid", p.StreamUUID,
-		"duration", meta.Duration,
-		"size", meta.Size,
-		"recorded_at", meta.RecordedAtString(),
-		"location", meta.Location,
-		"camera", meta.Camera,
-	)
 
 	_, err = h.streamService.UpdateStreamMetadata(ctx, &pb.UpdateStreamMetadataRequest{
 		StreamUuid: p.StreamUUID.String(),
@@ -142,10 +187,13 @@ func (h *HandleVideoTrancoder) handleTranscode(ctx context.Context, p VideoTrans
 
 	slog.Info("processing", "uuid", p.StreamUUID)
 
-	progChan, errChan := h.processor.TranscodeToHLS(ctx, inputLocal, hlsOutputDir)
+	progChan, errChan := h.processor.TranscodeToHLS(ctx, inputSrc, hlsOutputDir)
 
 	var lastSentPercent int32 = -1
-	const limit = 9 * 1024 * 1024 * 1024
+	// /tmp holds only the HLS output when the source is read via presigned
+	// url (~1.1 GiB per hour of video); the cap exists for the full-download
+	// fallback, where the input plus output share the volume.
+	const limit = 12 * 1024 * 1024 * 1024
 
 	for {
 		select {

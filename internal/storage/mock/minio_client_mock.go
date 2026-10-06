@@ -11,7 +11,9 @@ package mock
 
 import (
 	context "context"
+	url "net/url"
 	reflect "reflect"
+	time "time"
 
 	minio "github.com/minio/minio-go/v7"
 	gomock "go.uber.org/mock/gomock"
@@ -83,4 +85,34 @@ func (m *MockMinIOClient) ListObjectNames(ctx context.Context, bucketName, prefi
 func (mr *MockMinIOClientMockRecorder) ListObjectNames(ctx, bucketName, prefix any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListObjectNames", reflect.TypeOf((*MockMinIOClient)(nil).ListObjectNames), ctx, bucketName, prefix)
+}
+
+// PresignedGetObject mocks base method.
+func (m *MockMinIOClient) PresignedGetObject(ctx context.Context, bucketName, objectName string, expires time.Duration, reqParams url.Values) (*url.URL, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PresignedGetObject", ctx, bucketName, objectName, expires, reqParams)
+	ret0, _ := ret[0].(*url.URL)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// PresignedGetObject indicates an expected call of PresignedGetObject.
+func (mr *MockMinIOClientMockRecorder) PresignedGetObject(ctx, bucketName, objectName, expires, reqParams any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PresignedGetObject", reflect.TypeOf((*MockMinIOClient)(nil).PresignedGetObject), ctx, bucketName, objectName, expires, reqParams)
+}
+
+// StatObject mocks base method.
+func (m *MockMinIOClient) StatObject(ctx context.Context, bucketName, objectName string, opts minio.StatObjectOptions) (minio.ObjectInfo, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "StatObject", ctx, bucketName, objectName, opts)
+	ret0, _ := ret[0].(minio.ObjectInfo)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// StatObject indicates an expected call of StatObject.
+func (mr *MockMinIOClientMockRecorder) StatObject(ctx, bucketName, objectName, opts any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StatObject", reflect.TypeOf((*MockMinIOClient)(nil).StatObject), ctx, bucketName, objectName, opts)
 }

@@ -94,7 +94,7 @@ spec:
             secretName: grpc-transcoder-tls
         - name: tmp-disk
           emptyDir:
-            sizeLimit: 10Gi
+            sizeLimit: 15Gi
         - name: gpu-dri
           hostPath:
             path: /dev/dri

@@ -52,15 +52,19 @@ func TestHandle_HandleVideoTranscoderTask(t *testing.T) {
 			TaskVideoTranscoding,
 			payloadBytes,
 		)
+		// Preferred path: presigned url, ffprobe over http, no local copy.
 		mockStorage.EXPECT().
-			Download(
+			GeneratePresignedURL(
 				gomock.Any(),
 				payload.InputPath,
 				gomock.Any()).
-			Return(nil)
+			Return("https://minio.local/bucket/raw/video.mp4?X-Amz-Signature=abc", nil)
 		mockProcessor.EXPECT().
 			ProbeMetadata(gomock.Any(), gomock.Any()).
-			Return(processor.VideoMetadata{}, nil)
+			Return(processor.VideoMetadata{Duration: 42}, nil)
+		mockStorage.EXPECT().
+			StatSize(gomock.Any(), payload.InputPath).
+			Return(int64(1234), nil)
 		mockService.EXPECT().
 			UpdateStreamMetadata(
 				gomock.Any(),
@@ -117,12 +121,96 @@ func TestHandle_HandleVideoTranscoderTask(t *testing.T) {
 			TaskVideoTranscoding,
 			payloadBytes,
 		)
+		// Presign fails so the handler exercises the full-download fallback.
+		mockStorage.EXPECT().
+			GeneratePresignedURL(
+				gomock.Any(),
+				payload.InputPath,
+				gomock.Any()).
+			Return("", fmt.Errorf("presign error"))
 		mockStorage.EXPECT().
 			Download(
 				gomock.Any(),
 				payload.InputPath,
 				gomock.Any()).
 			Return(fmt.Errorf("download error"))
+		err := handler.HandleVideoTranscoderTask(ctx, task)
+		// A swallowed download error used to return nil and leave the stream
+		// frozen with no error; it must surface as a task failure now.
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "download failed")
+	})
+
+	t.Run("presigned probe failure falls back to download", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		mockProcessor := mockProc.NewMockVideoProcessor(ctrl)
+		mockStorage := mockStor.NewMockFileStorage(ctrl)
+		mockService := mockSvc.NewMockStreamServiceClient(ctrl)
+		handler := NewHandleVideoTranscoder(
+			mockProcessor,
+			mockStorage,
+			mockService,
+		)
+		ctx := context.Background()
+		streamUUID := uuid.New()
+		payload := VideoTranscodingPayload{
+			StreamUUID: streamUUID,
+			InputPath:  "raw/video.mp4",
+		}
+		payloadBytes, _ := json.Marshal(payload)
+		task := asynq.NewTask(
+			TaskVideoTranscoding,
+			payloadBytes,
+		)
+		mockStorage.EXPECT().
+			GeneratePresignedURL(
+				gomock.Any(),
+				payload.InputPath,
+				gomock.Any()).
+			Return("https://minio.local/bucket/raw/video.mp4?sig=x", nil)
+		// ffprobe over http fails once (e.g. transient network), the handler
+		// must retry through the full-download path.
+		mockProcessor.EXPECT().
+			ProbeMetadata(gomock.Any(), "https://minio.local/bucket/raw/video.mp4?sig=x").
+			Return(processor.VideoMetadata{}, fmt.Errorf("ffprobe probe failed"))
+		mockStorage.EXPECT().
+			Download(
+				gomock.Any(),
+				payload.InputPath,
+				gomock.Any()).
+			Return(nil)
+		mockProcessor.EXPECT().
+			ProbeMetadata(gomock.Any(), gomock.Any()).
+			Return(processor.VideoMetadata{}, nil)
+		mockService.EXPECT().
+			UpdateStreamMetadata(
+				gomock.Any(),
+				gomock.Any()).
+			Return(&stream.UpdateStreamMetadataResponse{}, nil)
+		progChan, errChan := closedProgressChans()
+		mockProcessor.EXPECT().
+			TranscodeToHLS(
+				gomock.Any(),
+				gomock.Any(),
+				gomock.Any()).
+			Return(progChan, errChan)
+		mockService.EXPECT().
+			UpdateStreamProcessing(
+				gomock.Any(),
+				gomock.Any()).
+			Return(&stream.UpdateStreamProcessingResponse{Updated: true}, nil).
+			AnyTimes()
+		mockStorage.EXPECT().
+			UploadDir(
+				gomock.Any(),
+				gomock.Any(),
+				gomock.Any()).
+			Return(nil)
+		mockService.EXPECT().
+			UpdateStreamStatus(
+				gomock.Any(),
+				gomock.Any()).
+			Return(&stream.UpdateStreamStatusResponse{}, nil)
 		err := handler.HandleVideoTranscoderTask(ctx, task)
 		require.NoError(t, err)
 	})
@@ -147,6 +235,12 @@ func TestHandle_HandleVideoTranscoderTask(t *testing.T) {
 			TaskVideoTranscoding,
 			payloadBytes,
 		)
+		mockStorage.EXPECT().
+			GeneratePresignedURL(
+				gomock.Any(),
+				payload.InputPath,
+				gomock.Any()).
+			Return("", fmt.Errorf("presign error"))
 		mockStorage.EXPECT().
 			Download(
 				gomock.Any(),
@@ -207,6 +301,12 @@ func TestHandle_HandleVideoTranscoderTask(t *testing.T) {
 			TaskVideoTranscoding,
 			payloadBytes,
 		)
+		mockStorage.EXPECT().
+			GeneratePresignedURL(
+				gomock.Any(),
+				payload.InputPath,
+				gomock.Any()).
+			Return("", fmt.Errorf("presign error"))
 		mockStorage.EXPECT().
 			Download(
 				gomock.Any(),
@@ -273,6 +373,12 @@ func TestHandle_HandleVideoTranscoderTask(t *testing.T) {
 			payloadBytes,
 		)
 		mockStorage.EXPECT().
+			GeneratePresignedURL(
+				gomock.Any(),
+				payload.InputPath,
+				gomock.Any()).
+			Return("", fmt.Errorf("presign error"))
+		mockStorage.EXPECT().
 			Download(
 				gomock.Any(),
 				payload.InputPath,
@@ -311,6 +417,12 @@ func TestHandle_HandleVideoTranscoderTask(t *testing.T) {
 			TaskVideoTranscoding,
 			payloadBytes,
 		)
+		mockStorage.EXPECT().
+			GeneratePresignedURL(
+				gomock.Any(),
+				payload.InputPath,
+				gomock.Any()).
+			Return("", fmt.Errorf("presign error"))
 		mockStorage.EXPECT().
 			Download(
 				gomock.Any(),

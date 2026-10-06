@@ -12,6 +12,7 @@ package mock
 import (
 	context "context"
 	reflect "reflect"
+	time "time"
 
 	gomock "go.uber.org/mock/gomock"
 )
@@ -66,6 +67,36 @@ func (m *MockFileStorage) DownloadDir(ctx context.Context, remoteDir, localDir s
 func (mr *MockFileStorageMockRecorder) DownloadDir(ctx, remoteDir, localDir any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DownloadDir", reflect.TypeOf((*MockFileStorage)(nil).DownloadDir), ctx, remoteDir, localDir)
+}
+
+// GeneratePresignedURL mocks base method.
+func (m *MockFileStorage) GeneratePresignedURL(ctx context.Context, remoteKey string, expires time.Duration) (string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GeneratePresignedURL", ctx, remoteKey, expires)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GeneratePresignedURL indicates an expected call of GeneratePresignedURL.
+func (mr *MockFileStorageMockRecorder) GeneratePresignedURL(ctx, remoteKey, expires any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GeneratePresignedURL", reflect.TypeOf((*MockFileStorage)(nil).GeneratePresignedURL), ctx, remoteKey, expires)
+}
+
+// StatSize mocks base method.
+func (m *MockFileStorage) StatSize(ctx context.Context, remoteKey string) (int64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "StatSize", ctx, remoteKey)
+	ret0, _ := ret[0].(int64)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// StatSize indicates an expected call of StatSize.
+func (mr *MockFileStorageMockRecorder) StatSize(ctx, remoteKey any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StatSize", reflect.TypeOf((*MockFileStorage)(nil).StatSize), ctx, remoteKey)
 }
 
 // Upload mocks base method.

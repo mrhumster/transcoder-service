@@ -3,9 +3,11 @@ package storage
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/mrhumster/transcoder-service/internal/storage/mock"
@@ -96,6 +98,71 @@ func TestMinioStorage_Upload(t *testing.T) {
 		err := minioStorage.Upload(ctx, objectName, filePath, "application/x-mpegURL")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "minio error")
+	})
+}
+
+func TestMinioStorage_GeneratePresignedURL(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		mockMinioClient := mock.NewMockMinIOClient(ctrl)
+		minioStorage := NewMinIOStorage(mockMinioClient, "files")
+		ctx := context.Background()
+
+		mockMinioClient.EXPECT().
+			PresignedGetObject(gomock.Any(), "files", "streams/a/video", gomock.Any(), nil).
+			DoAndReturn(func(_ context.Context, _, _ string, expires time.Duration, _ url.Values) (*url.URL, error) {
+				assert.Equal(t, 24*time.Hour, expires)
+				return &url.URL{Scheme: "http", Host: "minio:9000", Path: "/files/streams/a/video", RawQuery: "X-Amz-Signature=sig"}, nil
+			})
+
+		got, err := minioStorage.GeneratePresignedURL(ctx, "streams/a/video", 24*time.Hour)
+		require.NoError(t, err)
+		assert.Contains(t, got, "http://minio:9000/files/streams/a/video")
+		assert.Contains(t, got, "X-Amz-Signature=sig")
+	})
+
+	t.Run("client error propagation", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		mockMinioClient := mock.NewMockMinIOClient(ctrl)
+		minioStorage := NewMinIOStorage(mockMinioClient, "files")
+
+		mockMinioClient.EXPECT().
+			PresignedGetObject(gomock.Any(), "files", gomock.Any(), gomock.Any(), nil).
+			Return(nil, fmt.Errorf("signing failed"))
+
+		_, err := minioStorage.GeneratePresignedURL(context.Background(), "streams/a/video", time.Hour)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "signing failed")
+	})
+}
+
+func TestMinioStorage_StatSize(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		mockMinioClient := mock.NewMockMinIOClient(ctrl)
+		minioStorage := NewMinIOStorage(mockMinioClient, "files")
+
+		mockMinioClient.EXPECT().
+			StatObject(gomock.Any(), "files", "streams/a/video", gomock.Any()).
+			Return(minio.ObjectInfo{Size: 6 * 1024 * 1024 * 1024}, nil)
+
+		size, err := minioStorage.StatSize(context.Background(), "streams/a/video")
+		require.NoError(t, err)
+		assert.Equal(t, int64(6*1024*1024*1024), size)
+	})
+
+	t.Run("client error propagation", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		mockMinioClient := mock.NewMockMinIOClient(ctrl)
+		minioStorage := NewMinIOStorage(mockMinioClient, "files")
+
+		mockMinioClient.EXPECT().
+			StatObject(gomock.Any(), "files", gomock.Any(), gomock.Any()).
+			Return(minio.ObjectInfo{}, fmt.Errorf("bucket missing"))
+
+		_, err := minioStorage.StatSize(context.Background(), "streams/a/video")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "bucket missing")
 	})
 }
 

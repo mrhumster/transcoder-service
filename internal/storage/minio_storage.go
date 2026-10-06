@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 )
@@ -29,6 +30,27 @@ func (s *MinIOStorage) Download(ctx context.Context, objectName, filePath string
 		return fmt.Errorf("error download from storage: %w", err)
 	}
 	return nil
+}
+
+// GeneratePresignedURL signs a time-limited GET url for the object. The TTL
+// has to outlast the whole transcode task because ffmpeg re-seeks on the url
+// for the entire playback of the source.
+func (s *MinIOStorage) GeneratePresignedURL(ctx context.Context, objectName string, expires time.Duration) (string, error) {
+	u, err := s.Client.PresignedGetObject(ctx, s.Bucket, objectName, expires, nil)
+	if err != nil {
+		return "", fmt.Errorf("error generating presigned url for %s: %w", objectName, err)
+	}
+	return u.String(), nil
+}
+
+// StatSize returns the object size in bytes, mirroring os.Stat for local
+// files so metadata.size stays correct when the source is never downloaded.
+func (s *MinIOStorage) StatSize(ctx context.Context, objectName string) (int64, error) {
+	info, err := s.Client.StatObject(ctx, s.Bucket, objectName, minio.StatObjectOptions{})
+	if err != nil {
+		return 0, fmt.Errorf("error stat object %s: %w", objectName, err)
+	}
+	return info.Size, nil
 }
 
 // DownloadDir fetches every object under remoteDir into localDir. Keys are

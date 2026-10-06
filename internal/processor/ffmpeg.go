@@ -136,7 +136,7 @@ func (p *FFmpegProcessor) TranscodeToHLS(ctx context.Context, inputPath, outputD
 
 		stdout, _ := cmd.StdoutPipe()
 
-		slog.Info("starting ffmpeg", "input", inputPath, "output", outputDir)
+		slog.Info("starting ffmpeg", "input", redactURL(inputPath), "output", outputDir)
 		if err := cmd.Start(); err != nil {
 			errChan <- fmt.Errorf("ffmpeg start failed: %w", err)
 			return
@@ -205,4 +205,13 @@ func (p *FFmpegProcessor) probePath() string {
 		return probe
 	}
 	return "ffprobe"
+}
+
+// redactURL strips the query string so a presigned url's signature never
+// lands in the worker logs (the input is logged on every ffmpeg run).
+func redactURL(s string) string {
+	if i := strings.IndexByte(s, '?'); i >= 0 {
+		return s[:i] + "?[redacted]"
+	}
+	return s
 }
