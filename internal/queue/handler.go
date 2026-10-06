@@ -75,6 +75,12 @@ func (h *HandleVideoTrancoder) HandleVideoTranscoderTask(ctx context.Context, t 
 // re-seeking on the url for the entire source playback.
 const presignTTL = 24 * time.Hour
 
+// diskLimit caps how much the transcode may hold under /tmp. The source
+// travels over http when presigning works (~1.1 GiB per hour of HLS output),
+// so the cap guards the full-download fallback (input plus output share the
+// volume) and pathological cases.
+const diskLimit = 12 * 1024 * 1024 * 1024
+
 // resolveSource picks the input for ffprobe/ffmpeg and returns it together
 // with the probed metadata. The preferred path is a presigned url: ffmpeg
 // then reads the object straight from the storage with Range seeks, so a
@@ -146,6 +152,111 @@ func logProbedMetadata(id uuid.UUID, meta processor.VideoMetadata) {
 	)
 }
 
+// abortDiskFull reports the shared disk-full failure and returns the terminal
+// task error for it (retrying onto the same volume is pointless).
+func (h *HandleVideoTrancoder) abortDiskFull(ctx context.Context, id uuid.UUID) error {
+	slog.Error("CRITICAL: Out of free space, aborting", "size_tmp", getDirSize("/tmp"))
+	if _, err := h.streamService.UpdateStreamProcessing(ctx, &pb.UpdateStreamProcessingRequest{
+		StreamUuid: id.String(),
+		Progress:   0,
+		Steps:      []string{"Transcoding"},
+		Task:       "transcode",
+		Error:      "Not enough disk space on worker",
+	}); err != nil {
+		slog.Error("failed to report disk full", "error", err)
+	}
+	metrics.DiskFull.Inc()
+	return fmt.Errorf("no space left: %w", asynq.SkipRetry)
+}
+
+// reportConvertFailure flips the stream's processing row to a visible error so
+// the UI does not spin on a frozen percent while asynq retries the task.
+func (h *HandleVideoTrancoder) reportConvertFailure(ctx context.Context, id uuid.UUID, progress int32, cause string) {
+	if progress < 0 {
+		progress = 0
+	}
+	_, err := h.streamService.UpdateStreamProcessing(ctx, &pb.UpdateStreamProcessingRequest{
+		StreamUuid: id.String(),
+		Progress:   progress,
+		Steps:      []string{"Transcoding"},
+		Task:       "transcode",
+		Error:      fmt.Sprintf("failed convert: %s", cause),
+	})
+	if err != nil {
+		slog.Error("failed to report convert failure", "error", err)
+	}
+}
+
+// reportInterrupted handles ctx cancellation while a transcode is running. On
+// the last attempt the failure is terminal (asynq will archive the task), so
+// report it — otherwise the DB keeps a frozen progress with no error and the
+// stream looks stuck. Earlier attempts are retried silently: a mid-retry error
+// would flip the stream to StatusError.
+func (h *HandleVideoTrancoder) reportInterrupted(ctx context.Context, id uuid.UUID, progress int32, cause error) {
+	metrics.Aborted.Inc()
+	retryCount, ok := asynq.GetRetryCount(ctx)
+	if !ok {
+		return
+	}
+	maxRetry, mok := asynq.GetMaxRetry(ctx)
+	if !mok || retryCount < maxRetry {
+		return
+	}
+	if progress < 0 {
+		progress = 0
+	}
+	reportCtx, cancelReport := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancelReport()
+	_, err := h.streamService.UpdateStreamProcessing(reportCtx, &pb.UpdateStreamProcessingRequest{
+		StreamUuid: id.String(),
+		Progress:   progress,
+		Steps:      []string{"Transcoding"},
+		Task:       "transcode",
+		Error:      fmt.Sprintf("transcode interrupted: %s", cause.Error()),
+	})
+	if err != nil {
+		slog.Error("failed to report cancelled transcode", "error", err)
+	}
+}
+
+// reportUploading announces the final phase once every rendition file is in
+// the storage.
+func (h *HandleVideoTrancoder) reportUploading(ctx context.Context, id uuid.UUID) {
+	_, err := h.streamService.UpdateStreamProcessing(ctx, &pb.UpdateStreamProcessingRequest{
+		StreamUuid: id.String(),
+		Progress:   100,
+		Steps:      []string{"Uploading to the storage"},
+		Task:       "transcode",
+	})
+	if err != nil {
+		slog.Error("failed send progress in stream service", "error", err)
+	}
+}
+
+// markTranscodeReady publishes the final state: rendition in storage, stream
+// ready, processing row cleared.
+func (h *HandleVideoTrancoder) markTranscodeReady(ctx context.Context, id uuid.UUID) error {
+	_, err := h.streamService.UpdateStreamStatus(ctx, &pb.UpdateStreamStatusRequest{
+		StreamUuid: id.String(),
+		Status:     pb.Status_STATUS_READY,
+	})
+	if err != nil {
+		slog.Error("grpc notify failed", "error", err)
+		return err
+	}
+	_, err = h.streamService.UpdateStreamProcessing(ctx, &pb.UpdateStreamProcessingRequest{
+		StreamUuid: id.String(),
+		Progress:   100,
+		Steps:      []string{},
+		Task:       "transcode",
+	})
+	if err != nil {
+		slog.Error("failed send progress in stream service", "error", err)
+		return err
+	}
+	return nil
+}
+
 func (h *HandleVideoTrancoder) handleTranscode(ctx context.Context, p VideoTranscodingPayload) error {
 
 	workDir := fmt.Sprintf("/tmp/%s", p.StreamUUID)
@@ -153,12 +264,14 @@ func (h *HandleVideoTrancoder) handleTranscode(ctx context.Context, p VideoTrans
 	hlsOutputDir := workDir + "/hls"
 	outputDir := fmt.Sprintf("/tmp/%s", p.StreamUUID)
 
-	if err := os.Mkdir(outputDir, 0o755); err != nil {
+	// MkdirAll, not Mkdir: a pod kill leaves the work dir behind, and the
+	// retry (chunked: with resume) must be able to reuse it.
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		slog.Error("error creating temp dir", "error", err)
 		return err
 	}
 
-	if err := os.Mkdir(hlsOutputDir, 0o755); err != nil {
+	if err := os.MkdirAll(hlsOutputDir, 0o755); err != nil {
 		slog.Error("error creating temp dir", "error", err)
 		return err
 	}
@@ -185,15 +298,23 @@ func (h *HandleVideoTrancoder) handleTranscode(ctx context.Context, p VideoTrans
 		return err
 	}
 
+	// Sources past the chunk threshold go through the split pipeline: per
+	// 30-minute chunks with their own uploads and checkpoints, so a huge
+	// transcode never holds the whole output on disk and a retry resumes from
+	// the last completed chunk instead of re-encoding from the start.
+	if n := chunkCount(meta.Duration); n > 1 {
+		slog.Info("chunked transcode selected",
+			"uuid", p.StreamUUID,
+			"duration", meta.Duration,
+			"chunks", n)
+		return h.handleTranscodeChunked(ctx, p, inputSrc, meta)
+	}
+
 	slog.Info("processing", "uuid", p.StreamUUID)
 
 	progChan, errChan := h.processor.TranscodeToHLS(ctx, inputSrc, hlsOutputDir)
 
 	var lastSentPercent int32 = -1
-	// /tmp holds only the HLS output when the source is read via presigned
-	// url (~1.1 GiB per hour of video); the cap exists for the full-download
-	// fallback, where the input plus output share the volume.
-	const limit = 12 * 1024 * 1024 * 1024
 
 	for {
 		select {
@@ -203,18 +324,8 @@ func (h *HandleVideoTrancoder) handleTranscode(ctx context.Context, p VideoTrans
 				progChan = nil
 				continue
 			}
-			dirSize := getDirSize("/tmp")
-			if dirSize > limit {
-				slog.Error("CRITICAL: Out of free space, aborting", "size_tmp", dirSize)
-				h.streamService.UpdateStreamProcessing(ctx, &pb.UpdateStreamProcessingRequest{
-					StreamUuid: p.StreamUUID.String(),
-					Progress:   0,
-					Steps:      []string{"Transcoding"},
-					Task:       "transcode",
-					Error:      "Not enough disk space on worker",
-				})
-				metrics.DiskFull.Inc()
-				return fmt.Errorf("no space left: %w", asynq.SkipRetry)
+			if getDirSize("/tmp") > diskLimit {
+				return h.abortDiskFull(ctx, p.StreamUUID)
 			}
 
 			currentPercent := int32(prog.Percent)
@@ -242,13 +353,7 @@ func (h *HandleVideoTrancoder) handleTranscode(ctx context.Context, p VideoTrans
 				continue
 			}
 			if err != nil {
-				h.streamService.UpdateStreamProcessing(ctx, &pb.UpdateStreamProcessingRequest{
-					StreamUuid: p.StreamUUID.String(),
-					Progress:   int32(lastSentPercent),
-					Steps:      []string{"Transcoding"},
-					Task:       "transcode",
-					Error:      fmt.Sprintf("failed convert: %s", err.Error()),
-				})
+				h.reportConvertFailure(ctx, p.StreamUUID, lastSentPercent, err.Error())
 				slog.Error("FFMPEG ERROR", "err", err)
 				if strings.Contains(err.Error(), "no space left on device") {
 					return fmt.Errorf("disk full: %w", asynq.SkipRetry)
@@ -256,32 +361,8 @@ func (h *HandleVideoTrancoder) handleTranscode(ctx context.Context, p VideoTrans
 				return err
 			}
 		case <-ctx.Done():
-			metrics.Aborted.Inc()
 			slog.Warn("Context cancelled, stopping...")
-			// On the last attempt the failure is terminal (asynq will archive the
-			// task), so report it — otherwise the DB keeps a frozen progress with
-			// no error and the stream looks stuck. Earlier attempts are retried
-			// silently: a mid-retry error would flip the stream to StatusError.
-			if retryCount, ok := asynq.GetRetryCount(ctx); ok {
-				if maxRetry, mok := asynq.GetMaxRetry(ctx); mok && retryCount >= maxRetry {
-					reportProgress := lastSentPercent
-					if reportProgress < 0 {
-						reportProgress = 0
-					}
-					reportCtx, cancelReport := context.WithTimeout(context.Background(), 15*time.Second)
-					_, err := h.streamService.UpdateStreamProcessing(reportCtx, &pb.UpdateStreamProcessingRequest{
-						StreamUuid: p.StreamUUID.String(),
-						Progress:   reportProgress,
-						Steps:      []string{"Transcoding"},
-						Task:       "transcode",
-						Error:      fmt.Sprintf("transcode interrupted: %s", ctx.Err().Error()),
-					})
-					cancelReport()
-					if err != nil {
-						slog.Error("failed to report cancelled transcode", "error", err)
-					}
-				}
-			}
+			h.reportInterrupted(ctx, p.StreamUUID, lastSentPercent, ctx.Err())
 			return ctx.Err()
 		}
 
@@ -292,16 +373,7 @@ func (h *HandleVideoTrancoder) handleTranscode(ctx context.Context, p VideoTrans
 upload:
 	slog.Info("Starting upload phase", "uuid", p.StreamUUID)
 
-	updateProgReq := &pb.UpdateStreamProcessingRequest{
-		StreamUuid: p.StreamUUID.String(),
-		Progress:   int32(100),
-		Steps:      []string{"Uploading to the storage"},
-		Task:       "transcode",
-	}
-	_, err = h.streamService.UpdateStreamProcessing(ctx, updateProgReq)
-	if err != nil {
-		slog.Error("failed send progress in stream service", "error", err)
-	}
+	h.reportUploading(ctx, p.StreamUUID)
 
 	remoteProcessedDir := fmt.Sprintf("processed/%s", p.StreamUUID)
 	slog.Info("uploading HLS result", "remote", remoteProcessedDir)
@@ -313,25 +385,5 @@ upload:
 	}
 	slog.Info("transcoding success", "uuid", p.StreamUUID)
 
-	_, err = h.streamService.UpdateStreamStatus(ctx, &pb.UpdateStreamStatusRequest{
-		StreamUuid: p.StreamUUID.String(),
-		Status:     pb.Status_STATUS_READY,
-	})
-	if err != nil {
-		slog.Error("grpc notify failed", "error", err)
-		return err
-	}
-
-	updateProgReq = &pb.UpdateStreamProcessingRequest{
-		StreamUuid: p.StreamUUID.String(),
-		Progress:   int32(100),
-		Steps:      []string{},
-		Task:       "transcode",
-	}
-	_, err = h.streamService.UpdateStreamProcessing(ctx, updateProgReq)
-	if err != nil {
-		slog.Error("failed send progress in stream service", "error", err)
-	}
-
-	return nil
+	return h.markTranscodeReady(ctx, p.StreamUUID)
 }

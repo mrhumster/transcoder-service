@@ -71,6 +71,21 @@ func (mr *MockVideoProcessorMockRecorder) ProbeMetadata(ctx, inputPath any) *gom
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProbeMetadata", reflect.TypeOf((*MockVideoProcessor)(nil).ProbeMetadata), ctx, inputPath)
 }
 
+// TranscodeChunk mocks base method.
+func (m *MockVideoProcessor) TranscodeChunk(ctx context.Context, inputPath, outputDir string, startSec, durSec float64) (<-chan processor.Progress, <-chan error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "TranscodeChunk", ctx, inputPath, outputDir, startSec, durSec)
+	ret0, _ := ret[0].(<-chan processor.Progress)
+	ret1, _ := ret[1].(<-chan error)
+	return ret0, ret1
+}
+
+// TranscodeChunk indicates an expected call of TranscodeChunk.
+func (mr *MockVideoProcessorMockRecorder) TranscodeChunk(ctx, inputPath, outputDir, startSec, durSec any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TranscodeChunk", reflect.TypeOf((*MockVideoProcessor)(nil).TranscodeChunk), ctx, inputPath, outputDir, startSec, durSec)
+}
+
 // TranscodeToHLS mocks base method.
 func (m *MockVideoProcessor) TranscodeToHLS(ctx context.Context, inputPath, outputDir string) (<-chan processor.Progress, <-chan error) {
 	m.ctrl.T.Helper()
