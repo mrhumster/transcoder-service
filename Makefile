@@ -35,7 +35,7 @@ test:
 	go test -v ./...
 
 logs:
-	kubectl -n $(NAMESPACE) logs -f -l app=transcoder
+	kubectl -n $(NAMESPACE) logs -f -l app=$(DEPLOYMENT)
 
 proto:
 	@echo "Generate protoc"
