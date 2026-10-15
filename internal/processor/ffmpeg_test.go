@@ -220,6 +220,77 @@ func TestFinalProgress(t *testing.T) {
 	}
 }
 
+// writeFakeFFmpeg drops an executable stand-in for the ffmpeg binary and
+// returns its path. The script receives the real argument vector, so tests can
+// branch on flags (e.g. "-vaapi_device") without any hardware.
+func writeFakeFFmpeg(t *testing.T, script string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ffmpeg")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// TestRunFFmpeg_ReportsStderr pins the diagnostic contract: ffmpeg's stderr
+// must survive into the returned error instead of a bare "exit status 1".
+func TestRunFFmpeg_ReportsStderr(t *testing.T) {
+	p := &FFmpegProcessor{
+		binPath: writeFakeFFmpeg(t, "echo 'boom: no such filter' >&2\nexit 1\n"),
+		encoder: EncoderCPU,
+	}
+	outDir := t.TempDir()
+
+	progChan, errChan := p.TranscodeToHLS(context.Background(), "/in/video.mp4", outDir)
+	drainProgress(progChan)
+
+	var got error
+	for err := range errChan {
+		got = err
+	}
+	if got == nil {
+		t.Fatal("expected a transcode error")
+	}
+	if !strings.Contains(got.Error(), "boom: no such filter") {
+		t.Fatalf("error lost ffmpeg stderr: %v", got)
+	}
+}
+
+// TestRunFFmpeg_FallsBackToCPU covers the VAAPI-as-broken-hardware path: the
+// first attempt dies before a single frame, so the run must retry on software
+// and leave the processor pinned to cpu.
+func TestRunFFmpeg_FallsBackToCPU(t *testing.T) {
+	script := `for a in "$@"; do
+  if [ "$a" = "-vaapi_device" ]; then
+    echo "No VA display found for device" >&2
+    exit 1
+  fi
+done
+echo "frame=1"
+echo "out_time_us=1000000"
+echo "progress=end"
+exit 0
+`
+	p := &FFmpegProcessor{binPath: writeFakeFFmpeg(t, script), encoder: EncoderVAAPI}
+	outDir := t.TempDir()
+
+	progChan, errChan := p.TranscodeToHLS(context.Background(), "/in/video.mp4", outDir)
+	drainProgress(progChan)
+
+	for err := range errChan {
+		t.Fatalf("expected software retry to succeed, got: %v", err)
+	}
+	if got := p.Encoder(); got != EncoderCPU {
+		t.Fatalf("processor not demoted to cpu, got %s", got)
+	}
+}
+
+func drainProgress(ch <-chan Progress) {
+	for range ch {
+	}
+}
+
 // TestTranscodeChunk_GlobalProgress runs a real ffmpeg slice and checks the
 // contract the chunked handler relies on: the output covers durSec of the
 // source and every percent (including the final flush) lives on the whole
