@@ -17,16 +17,18 @@ func newTestProcessor(encoder string) *FFmpegProcessor {
 
 func TestBuildArgs_CPU(t *testing.T) {
 	p := newTestProcessor(EncoderCPU)
-	args := p.buildArgs("/in/video.mp4", "/out/dir")
+	// 1080p source: the cap must follow the resolution, not a fixed 2500k.
+	args := p.buildArgs("/in/video.mp4", "/out/dir", resolution{width: 1920, height: 1080})
 
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
 		"-threads", "0",
 		"-c:v", "libx264",
+		"-preset", "veryfast",
+		"-crf", "20",
 		"-c:a", "aac",
-		"-b:v", "2500k",
-		"-maxrate", "2500k",
-		"-bufsize", "5000k",
+		"-maxrate", "8000k",
+		"-bufsize", "12000k",
 		"-hls_time", "10",
 		"-hls_list_size", "0",
 		"-f", "hls",
@@ -34,6 +36,12 @@ func TestBuildArgs_CPU(t *testing.T) {
 		if !containsArg(args, want) {
 			t.Errorf("cpu args missing %q", want)
 		}
+	}
+	if strings.Contains(joined, "-b:v") {
+		t.Errorf("cpu args must not use a fixed -b:v: %s", joined)
+	}
+	if strings.Contains(joined, "scale") {
+		t.Errorf("cpu args must not scale the source: %s", joined)
 	}
 	if !strings.Contains(joined, "-hls_segment_filename "+"/out/dir/seg_%d.ts") {
 		t.Errorf("hls segment filename wrong: %s", joined)
@@ -45,7 +53,7 @@ func TestBuildArgs_CPU(t *testing.T) {
 
 func TestBuildArgs_VAAPI(t *testing.T) {
 	p := newTestProcessor(EncoderVAAPI)
-	args := p.buildArgs("/in/video.mp4", "/out/dir")
+	args := p.buildArgs("/in/video.mp4", "/out/dir", resolution{width: 1280, height: 720})
 
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
@@ -53,6 +61,9 @@ func TestBuildArgs_VAAPI(t *testing.T) {
 		"-c:v", "h264_vaapi",
 		"-vf", "format=nv12,hwupload",
 		"-c:a", "aac",
+		"-qp", "23",
+		"-maxrate", "5000k",
+		"-bufsize", "7500k",
 		"-f", "hls",
 	} {
 		if !containsArg(args, want) {
@@ -74,6 +85,9 @@ func TestBuildArgs_VAAPI(t *testing.T) {
 	}
 	if strings.Contains(joined, "-threads") {
 		t.Errorf("vaapi args must not contain -threads: %s", joined)
+	}
+	if strings.Contains(joined, "-crf") {
+		t.Errorf("vaapi has no -crf, must use -qp: %s", joined)
 	}
 }
 
@@ -122,7 +136,7 @@ func containsArg(args []string, want string) bool {
 
 func TestBuildChunkArgs_ChunkedFlags(t *testing.T) {
 	p := newTestProcessor(EncoderCPU)
-	args := p.buildChunkArgs("/in/video.mp4", "/out/dir", chunkRange{startSec: 1800, durSec: 1800})
+	args := p.buildChunkArgs("/in/video.mp4", "/out/dir", chunkRange{startSec: 1800, durSec: 1800}, resolution{width: 1920, height: 1080})
 
 	idxOf := func(flag string) int {
 		for i, a := range args {
@@ -156,7 +170,7 @@ func TestBuildChunkArgs_ChunkedFlags(t *testing.T) {
 
 func TestBuildChunkArgs_VAAPIChunk(t *testing.T) {
 	p := newTestProcessor(EncoderVAAPI)
-	args := p.buildChunkArgs("/in/video.mp4", "/out/dir", chunkRange{startSec: 60, durSec: 30})
+	args := p.buildChunkArgs("/in/video.mp4", "/out/dir", chunkRange{startSec: 60, durSec: 30}, resolution{width: 1920, height: 1080})
 	joined := strings.Join(args, " ")
 
 	if !containsArg(args, "-vaapi_device") || !containsArg(args, "h264_vaapi") {
@@ -186,13 +200,55 @@ func TestBuildChunkArgs_VAAPIChunk(t *testing.T) {
 // zero chunk: buildArgs is now a thin wrapper, and a drift here would
 // silently change every short-video transcode.
 func TestBuildArgs_MatchesFirstChunk(t *testing.T) {
+	res := resolution{width: 1920, height: 1080}
 	for _, enc := range []string{EncoderCPU, EncoderVAAPI} {
 		p := newTestProcessor(enc)
-		single := strings.Join(p.buildArgs("/in/video.mp4", "/out/dir"), "\x00")
-		first := strings.Join(p.buildChunkArgs("/in/video.mp4", "/out/dir", chunkRange{}), "\x00")
+		single := strings.Join(p.buildArgs("/in/video.mp4", "/out/dir", res), "\x00")
+		first := strings.Join(p.buildChunkArgs("/in/video.mp4", "/out/dir", chunkRange{}, res), "\x00")
 		if single != first {
 			t.Fatalf("%s: single-pass args drifted from the zero chunk:\nsingle: %s\nchunk:  %s",
-				enc, strings.Join(p.buildArgs("/in/video.mp4", "/out/dir"), " "), strings.Join(p.buildChunkArgs("/in/video.mp4", "/out/dir", chunkRange{}), " "))
+				enc, strings.Join(p.buildArgs("/in/video.mp4", "/out/dir", res), " "), strings.Join(p.buildChunkArgs("/in/video.mp4", "/out/dir", chunkRange{}, res), " "))
+		}
+	}
+}
+
+func TestBitrateCapFor_Ladder(t *testing.T) {
+	cases := []struct {
+		name    string
+		res     resolution
+		maxrate string
+		bufsize string
+	}{
+		{"unknown", resolution{}, "8000k", "12000k"},
+		{"480p", resolution{width: 640, height: 480}, "2500k", "5000k"},
+		{"720p", resolution{width: 1280, height: 720}, "5000k", "7500k"},
+		{"1080p", resolution{width: 1920, height: 1080}, "8000k", "12000k"},
+		{"portrait-1080p", resolution{width: 1080, height: 1920}, "8000k", "12000k"},
+		{"1440p", resolution{width: 2560, height: 1440}, "14000k", "21000k"},
+		{"4k", resolution{width: 3840, height: 2160}, "24000k", "36000k"},
+	}
+	for _, tc := range cases {
+		maxrate, bufsize := bitrateCapFor(tc.res)
+		if maxrate != tc.maxrate || bufsize != tc.bufsize {
+			t.Errorf("%s: got %s/%s, want %s/%s", tc.name, maxrate, bufsize, tc.maxrate, tc.bufsize)
+		}
+	}
+}
+
+func TestQualityArgs_Encoders(t *testing.T) {
+	cpu := qualityArgs(EncoderCPU, resolution{width: 1920, height: 1080})
+	for _, want := range []string{"-preset", libx264Preset, "-crf", libx264CRF, "-maxrate", "8000k", "-bufsize", "12000k"} {
+		if !containsArg(cpu, want) {
+			t.Errorf("cpu quality args missing %q: %v", want, cpu)
+		}
+	}
+	vaapi := qualityArgs(EncoderVAAPI, resolution{width: 1920, height: 1080})
+	if containsArg(vaapi, "-crf") || containsArg(vaapi, "-preset") {
+		t.Errorf("vaapi quality args must not carry crf/preset: %v", vaapi)
+	}
+	for _, want := range []string{"-qp", vaapiQP, "-maxrate", "8000k", "-bufsize", "12000k"} {
+		if !containsArg(vaapi, want) {
+			t.Errorf("vaapi quality args missing %q: %v", want, vaapi)
 		}
 	}
 }

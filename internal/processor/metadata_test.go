@@ -16,10 +16,10 @@ func TestMetadataFromProbe_Tags(t *testing.T) {
 			Duration: "3.040000",
 			Size:     "1048576",
 			Tags: map[string]string{
-				"creation_time":                 "2024-02-29T12:34:56.000000Z",
-				formatTagLocationISO:            "+55.7558+037.6176/",
-				formatTagMake:                   "Apple",
-				formatTagModel:                  "iPhone 13 Pro Max",
+				"creation_time":                  "2024-02-29T12:34:56.000000Z",
+				formatTagLocationISO:             "+55.7558+037.6176/",
+				formatTagMake:                    "Apple",
+				formatTagModel:                   "iPhone 13 Pro Max",
 				"com.apple.quicktime.encoded_by": "foo",
 			},
 		},
@@ -45,6 +45,35 @@ func TestMetadataFromProbe_Tags(t *testing.T) {
 	}
 	if got := m.RecordedAtString(); got != "2024-02-29T12:34:56Z" {
 		t.Errorf("recorded_at string = %q", got)
+	}
+}
+
+func TestMetadataFromProbe_Resolution(t *testing.T) {
+	// ffprobe lists streams in container order; the first "video" stream wins
+	// even when an audio stream (width/height 0) comes first.
+	ff := &ffprobeOutput{
+		Streams: []ffprobeStream{
+			{CodecType: "audio"},
+			{CodecType: "video", Width: 1080, Height: 1920},
+		},
+	}
+
+	m := metadataFromProbe(ff)
+
+	if m.Width != 1080 || m.Height != 1920 {
+		t.Errorf("resolution = %dx%d, want 1080x1920", m.Width, m.Height)
+	}
+}
+
+func TestMetadataFromProbe_NoVideoStream(t *testing.T) {
+	ff := &ffprobeOutput{
+		Streams: []ffprobeStream{{CodecType: "audio", Width: 0, Height: 0}},
+	}
+
+	m := metadataFromProbe(ff)
+
+	if m.Width != 0 || m.Height != 0 {
+		t.Errorf("resolution = %dx%d, want zero (unknown)", m.Width, m.Height)
 	}
 }
 
@@ -171,10 +200,10 @@ func TestMetadataFromProbe_PhoneWithoutLocation(t *testing.T) {
 
 func TestParseISO6709_DecimalDegrees(t *testing.T) {
 	cases := []struct {
-		in       string
-		wantLat  float64
-		wantLng  float64
-		wantOK   bool
+		in      string
+		wantLat float64
+		wantLng float64
+		wantOK  bool
 	}{
 		{"+55.7558+037.6176/", 55.7558, 37.6176, true},
 		{"+52.1816+005.0215/", 52.1816, 5.0215, true},

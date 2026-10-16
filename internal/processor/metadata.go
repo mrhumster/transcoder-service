@@ -13,7 +13,7 @@ import (
 // Tag keys that commonly carry media-originated metadata in MP4/MOV/QuickTime
 // containers produced by phones and cameras.
 const (
-	formatTagCreationTime = "creation_time"
+	formatTagCreationTime  = "creation_time"
 	formatTagCreationDate  = "creation_date"
 	formatTagQuickTimeDate = "com.apple.quicktime.creationdate"
 
@@ -28,8 +28,13 @@ const (
 // VideoMetadata holds the media-originated fields extracted from the source
 // file. Zero values mean the value is absent in the file.
 type VideoMetadata struct {
-	Duration   float64
-	Size       int64
+	Duration float64
+	Size     int64
+	// Width/Height are the first video stream's coded dimensions. Because the
+	// transcode never scales, these are also the output dimensions; zero means
+	// the probe found no video stream.
+	Width      int
+	Height     int
 	RecordedAt time.Time
 	Location   string
 	Camera     string
@@ -53,7 +58,10 @@ type ffprobeFormat struct {
 }
 
 type ffprobeStream struct {
-	Tags map[string]string `json:"tags"`
+	CodecType string            `json:"codec_type"`
+	Width     int               `json:"width"`
+	Height    int               `json:"height"`
+	Tags      map[string]string `json:"tags"`
 }
 
 type ffprobeOutput struct {
@@ -98,6 +106,14 @@ func metadataFromProbe(ff *ffprobeOutput) VideoMetadata {
 	if ff.Format.Size != "" {
 		if s, err := strconv.ParseInt(ff.Format.Size, 10, 64); err == nil {
 			m.Size = s
+		}
+	}
+	// The video stream carries the coded dimensions; audio streams have zero
+	// width/height, so pick the first stream that is actually video.
+	for _, s := range ff.Streams {
+		if s.CodecType == "video" {
+			m.Width, m.Height = s.Width, s.Height
+			break
 		}
 	}
 

@@ -288,7 +288,7 @@ func (h *HandleVideoTrancoder) handleTranscode(ctx context.Context, p VideoTrans
 		Duration:   int32(meta.Duration),
 		Size:       meta.Size,
 		Format:     "hls",
-		Resolution: "1280x720",
+		Resolution: resolutionString(meta),
 		RecordedAt: meta.RecordedAtString(),
 		Location:   meta.Location,
 		Camera:     meta.Camera,
@@ -386,4 +386,14 @@ upload:
 	slog.Info("transcoding success", "uuid", p.StreamUUID)
 
 	return h.markTranscodeReady(ctx, p.StreamUUID)
+}
+
+// resolutionString formats the probed video dimensions for the stream metadata.
+// The transcode never scales, so the source size is the output size; an empty
+// string means the probe could not determine it (rather than a made-up value).
+func resolutionString(meta processor.VideoMetadata) string {
+	if meta.Width <= 0 || meta.Height <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%dx%d", meta.Width, meta.Height)
 }

@@ -27,7 +27,62 @@ const (
 	ffmpegStderrTail = 4096
 	// vaapiProbeTimeout caps the one-frame hardware probe run at startup.
 	vaapiProbeTimeout = 20 * time.Second
+
+	// Software encoding uses capped CRF: constant perceptual quality with a
+	// hard bitrate ceiling, so quality adapts to the content instead of the
+	// fixed 2.5 Mbit/s that visibly blocked up 1080p phone footage. The preset
+	// keeps a CPU-only node from spending minutes per minute of video.
+	libx264Preset = "veryfast"
+	libx264CRF    = "20"
+	// h264_vaapi has no -crf; a constant quantizer plays the same role, with
+	// the same bitrate ceiling applied on top.
+	vaapiQP = "23"
 )
+
+// resolution is the pixel size of the source, used only to size the bitrate
+// ceiling. A zero value means "unknown".
+type resolution struct {
+	width  int
+	height int
+}
+
+// bitrateCapFor returns the (maxrate, bufsize) ceiling for a source of the
+// given resolution. CRF already decides the average quality, so the ceiling
+// only bites in high-motion scenes: sizing it by pixel count keeps a 1080p clip
+// from being squeezed into SD bitrate (the original bug: every video, whatever
+// its size, was forced to 2500k) while not blowing up a phone 4K clip either.
+func bitrateCapFor(res resolution) (maxrate, bufsize string) {
+	switch pixels := res.width * res.height; {
+	case pixels == 0:
+		return "8000k", "12000k" // unknown: assume 1080p
+	case pixels <= 640*480:
+		return "2500k", "5000k"
+	case pixels <= 1280*720:
+		return "5000k", "7500k"
+	case pixels <= 1920*1080:
+		return "8000k", "12000k"
+	case pixels <= 2560*1440:
+		return "14000k", "21000k"
+	default:
+		return "24000k", "36000k"
+	}
+}
+
+// qualityArgs returns the rate-control flags appended after the codec choice.
+// The resolution is deliberately left untouched (no -vf scale): a source keeps
+// its own dimensions and gains quality through the encoder settings instead.
+func qualityArgs(encoder string, res resolution) []string {
+	maxrate, bufsize := bitrateCapFor(res)
+	if encoder == EncoderVAAPI {
+		return []string{"-qp", vaapiQP, "-maxrate", maxrate, "-bufsize", bufsize}
+	}
+	return []string{
+		"-preset", libx264Preset,
+		"-crf", libx264CRF,
+		"-maxrate", maxrate,
+		"-bufsize", bufsize,
+	}
+}
 
 type FFmpegProcessor struct {
 	binPath string
@@ -112,8 +167,8 @@ type chunkRange struct {
 	durSec   float64
 }
 
-func (p *FFmpegProcessor) buildArgs(inputPath, outputDir string) []string {
-	return p.buildChunkArgs(inputPath, outputDir, chunkRange{})
+func (p *FFmpegProcessor) buildArgs(inputPath, outputDir string, res resolution) []string {
+	return p.buildChunkArgs(inputPath, outputDir, chunkRange{}, res)
 }
 
 // buildChunkArgs is the single source of ffmpeg arguments for both paths:
@@ -121,13 +176,13 @@ func (p *FFmpegProcessor) buildArgs(inputPath, outputDir string) []string {
 // command line, and for a chunk it wraps the input with -ss/-t (fast seek,
 // only the window is decoded) plus -output_ts_offset so the chunk lands on
 // the global timeline instead of restarting at the encoder's base timestamp.
-func (p *FFmpegProcessor) buildChunkArgs(inputPath, outputDir string, r chunkRange) []string {
-	return p.buildChunkArgsFor(p.Encoder(), inputPath, outputDir, r)
+func (p *FFmpegProcessor) buildChunkArgs(inputPath, outputDir string, r chunkRange, res resolution) []string {
+	return p.buildChunkArgsFor(p.Encoder(), inputPath, outputDir, r, res)
 }
 
 // buildChunkArgsFor is buildChunkArgs with an explicit encoder, so a run can
 // be retried on a different encoder without mutating shared state first.
-func (p *FFmpegProcessor) buildChunkArgsFor(encoder, inputPath, outputDir string, r chunkRange) []string {
+func (p *FFmpegProcessor) buildChunkArgsFor(encoder, inputPath, outputDir string, r chunkRange, res resolution) []string {
 	playlistPath := fmt.Sprintf("%s/index.m3u8", outputDir)
 	args := []string{}
 	if encoder == EncoderVAAPI {
@@ -156,12 +211,8 @@ func (p *FFmpegProcessor) buildChunkArgsFor(encoder, inputPath, outputDir string
 			"-c:v", "libx264",
 		)
 	}
-	args = append(args,
-		"-c:a", "aac",
-		"-b:v", "2500k",
-		"-maxrate", "2500k",
-		"-bufsize", "5000k",
-	)
+	args = append(args, "-c:a", "aac")
+	args = append(args, qualityArgs(encoder, res)...)
 	if r.startSec > 0 {
 		args = append(args, "-output_ts_offset", strconv.FormatFloat(r.startSec, 'f', -1, 64))
 	}
@@ -240,9 +291,14 @@ func (p *FFmpegProcessor) runFFmpeg(ctx context.Context, inputPath, outputDir st
 		defer close(progChan)
 		defer close(errChan)
 
+		// Probe the source resolution once per run; every chunk shares it, and
+		// the cap only needs to be sized along a coarse ladder, so a failed
+		// probe degrading to a default cap is fine.
+		res := p.videoResolution(ctx, inputPath)
+
 		candidates := p.encoderCandidates()
 		for i, encoder := range candidates {
-			madeProgress, err := p.runFFmpegOnce(ctx, encoder, inputPath, outputDir, totalDuration, chunk, progChan)
+			madeProgress, err := p.runFFmpegOnce(ctx, encoder, inputPath, outputDir, totalDuration, chunk, res, progChan)
 			if err == nil {
 				progChan <- p.finalProgress(chunk, totalDuration)
 				slog.Info("ffmpeg process exited successfully", "encoder", encoder)
@@ -266,12 +322,12 @@ func (p *FFmpegProcessor) runFFmpeg(ctx context.Context, inputPath, outputDir st
 // runFFmpegOnce runs a single ffmpeg invocation for one encoder. It reports
 // whether any frame was encoded, which the caller uses to tell a hardware
 // initialisation failure apart from a genuine transcode error.
-func (p *FFmpegProcessor) runFFmpegOnce(ctx context.Context, encoder, inputPath, outputDir string, totalDuration float64, chunk *chunkRange, progChan chan<- Progress) (bool, error) {
+func (p *FFmpegProcessor) runFFmpegOnce(ctx context.Context, encoder, inputPath, outputDir string, totalDuration float64, chunk *chunkRange, res resolution, progChan chan<- Progress) (bool, error) {
 	var r chunkRange
 	if chunk != nil {
 		r = *chunk
 	}
-	args := p.buildChunkArgsFor(encoder, inputPath, outputDir, r)
+	args := p.buildChunkArgsFor(encoder, inputPath, outputDir, r, res)
 
 	cmd := exec.CommandContext(ctx, p.binPath, args...)
 	stdout, err := cmd.StdoutPipe()
@@ -410,6 +466,32 @@ func (p *FFmpegProcessor) GetDuration(ctx context.Context, inputPath string) (fl
 	}
 	durationStr := strings.TrimSpace(string(out))
 	return strconv.ParseFloat(durationStr, 64)
+}
+
+// videoResolution probes the first video stream's pixel dimensions. It only
+// feeds the bitrate cap, so any failure (no ffprobe, no video stream, odd
+// output) is non-fatal and returns the zero resolution, which sizes the cap to
+// the 1080p default.
+func (p *FFmpegProcessor) videoResolution(ctx context.Context, inputPath string) resolution {
+	args := []string{
+		"-v", "error",
+		"-select_streams", "v:0",
+		"-show_entries", "stream=width,height",
+		"-of", "csv=p=0",
+		inputPath,
+	}
+	out, err := exec.CommandContext(ctx, p.probePath(), args...).Output()
+	if err != nil {
+		return resolution{}
+	}
+	// csv=p=0 prints "<width>,<height>".
+	fields := strings.Split(strings.TrimSpace(string(out)), ",")
+	if len(fields) < 2 {
+		return resolution{}
+	}
+	w, _ := strconv.Atoi(strings.TrimSpace(fields[0]))
+	h, _ := strconv.Atoi(strings.TrimSpace(fields[1]))
+	return resolution{width: w, height: h}
 }
 
 // probePath resolves ffprobe relative to the ffmpeg binary directory.
